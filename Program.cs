@@ -26,7 +26,6 @@ namespace HyperVTools
                     ClusterName = args[i + 1];
                 }
             }
-            //Holy moley it works on a single server (my laptop)
             NodeServers = GetServers();
         }
         /// <summary>
@@ -44,6 +43,7 @@ namespace HyperVTools
             List<Server> servers = new List<Server>();
             if (!IsCluster)
             {
+                //We still will use the list (saves logic in the future) for the local machine
                 CimSession session = CimSession.Create("localhost");
                 IEnumerable<CimInstance> ClassEnumerator = session.EnumerateInstances(CIM_VRTNS,CIM_VMCLASS);
                 int num_vms = 0;
