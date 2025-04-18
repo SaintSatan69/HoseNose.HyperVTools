@@ -8,11 +8,14 @@ namespace HyperVTools
         //If this is attached to a cluster (will be buggy)
         private static string ClusterName;
         private static List<Server> NodeServers;
+        private static Dictionary<Server, List<VirtualMachine>> ServerToVM;
         private static Boolean IsCluster = false;
 #pragma warning restore CS8618
         //In the event we need to touch WMI/CIM to talk to the hypervisor(s) (very likely)
         private const string CIM_VRTNS = "root/virtualization/v2";
-        private const string CIM_VMCLASS = "Msvm_ComputerSystem";
+        private const string CIM_VMCLASS = "Msvm_ComputerSystem"; //The HyperVisors Root partition shows up in this class make sure to ignore it
+        private const string CIM_VCPUCLASS = "Msvm_Processor";
+        private const string CIM_MEMSETTINGS = "Msvm_MemorySettingData";
         private const string CIM_CLSVRTNS = "root/HyperVCluster/v2";
         private const string CIM_CLRNS = "root/mscluster";
         private const string CIM_CLNODECLASS = "MSCluster_Node";
@@ -27,6 +30,7 @@ namespace HyperVTools
                 }
             }
             NodeServers = GetServers();
+            //With the Current Nodes, we now need to actually get each servers VMS and the current state and periodically poll the node for updates
         }
         /// <summary>
         /// The Function that logs the error without causing the whole program to crash
@@ -85,6 +89,27 @@ namespace HyperVTools
                 }
             }
             return servers;
+        }
+        public static List<VirtualMachine> GetVirtualMachines(string Server)
+        {
+            List<VirtualMachine> VirtualMachines = new List<VirtualMachine>();
+            //the same thing we do to get the amount of VMs when initally learning the servers
+            CimSession NodeSession = CimSession.Create(Server);
+            IEnumerable<CimInstance> CimData_VM = NodeSession.EnumerateInstances(CIM_VRTNS,CIM_VMCLASS);
+            IEnumerable<CimInstance> Cimdata_CPU = NodeSession.EnumerateInstances(CIM_VRTNS,CIM_VCPUCLASS);
+            IEnumerable<CimInstance> Cimdata_MEM = NodeSession.EnumerateInstances(CIM_VRTNS, CIM_MEMSETTINGS);
+            foreach (CimInstance VM_instance in CimData_VM)
+            {
+                string VM_NAME = VM_instance.CimInstanceProperties["ElementName"].Value.ToString();
+                //The logical name is just its GUID
+                string VM_LOGICAL_NAME = VM_instance.CimInstanceProperties["Name"].Value.ToString();
+                //This is cursed
+                int num_CPU = (Cimdata_CPU.Where(e => e.CimInstanceProperties["SystemName"].Value.ToString() == VM_LOGICAL_NAME)).Count();
+                //This is even MORE cursed
+                int GB_mem = (int)(Cimdata_MEM.Where(m => m.CimInstanceProperties["InstanceID"].Value.ToString() == $"Microsoft:{VM_LOGICAL_NAME}\\4764334d-e001-4176-82ee-5594ec9b530e")).First().CimInstanceProperties["VirtualQuantity"].Value;
+                VirtualMachines.Add(new VirtualMachine(Guid.Parse(VM_LOGICAL_NAME),VM_NAME,num_CPU,GB_mem / 1024));
+            }
+            return VirtualMachines;
         }
     }
 }
