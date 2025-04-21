@@ -35,12 +35,17 @@
                     break;
             }
         }
+        //All the states we would be looking for to be able to process requests
         public enum VirtualMachineStates
         {
             UNKNOWN = 0,
             OK = 2,
-            SHUTDOWN = 3,
+            OFF = 3,
+            SHUTDOWN = 4
         }
+        /// <summary>
+        /// All the Avaiable states a VM can be issued to move to (without code spagetti), Disabled instantly turns if off so be carefull
+        /// </summary>
         public enum RequestableStates
         {
             Enabled = 2,

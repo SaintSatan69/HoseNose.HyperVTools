@@ -230,12 +230,12 @@ namespace HyperVTools
 
         }
         /// <summary>
-        /// Probably Never going to be used but to not forget the way to invoke a CIM method against an object, if it is used bewarned its the same as unplugging the computer/turning off the VM not cleanly
+        /// Probably Never going to be used but to not forget the way to invoke a CIM method against an object, if it is used bewarned its the same as unplugging the computer/turning off the VM not cleanly (Its really just KillVM)
         /// </summary>
         /// <param name="server"></param>
         /// <param name="VM"></param>
         /// <returns></returns>
-        public static int KillVM(string server,VirtualMachine VM) { 
+        public static int ChangeVMState(string server,VirtualMachine VM,VirtualMachine.VirtualMachineStates DesiredVMState) { 
             CimSession session = CimSession.Create(server);
             IEnumerable<CimInstance> cimInstances = session.EnumerateInstances(CIM_VRTNS,CIM_VMCLASS);
             CimInstance VMInstance;
@@ -245,11 +245,11 @@ namespace HyperVTools
             }
             catch (Exception ex)
             {
-                Debugger.Log(1,"",$"Failed to retrive VM {VM.FriendlyName} from Server {server} exception is {ex.Message}");
+                Debugger.Log(1,"",$"Failed to retrive VM {VM.FriendlyName} from Server {server} exception is {ex.Message} did the VM Move to a different server?");
                 return -1;
             }
             CimMethodParametersCollection method_params = new CimMethodParametersCollection();
-            CimMethodParameter param = CimMethodParameter.Create("RequestedState",3,CimType.UInt16,CimFlags.None);
+            CimMethodParameter param = CimMethodParameter.Create("RequestedState",(int)DesiredVMState,CimType.UInt16,CimFlags.None);
             method_params.Add(param);
             var result = session.InvokeMethod(VMInstance,"RequestStateChange",method_params);
             return (int)result.ReturnValue.Value;
