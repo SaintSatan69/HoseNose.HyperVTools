@@ -1,4 +1,6 @@
-﻿using System.Diagnostics;
+﻿using System.Collections;
+using System.Diagnostics;
+using System.Numerics;
 using Microsoft.Management.Infrastructure;
 namespace HyperVTools
 {
@@ -21,6 +23,8 @@ namespace HyperVTools
         private const string CIM_CLNODECLASS = "MSCluster_Node";
 
         private const string FORMAT_SPACE = "                                ";
+        private static int POLL_TIME = 100;
+        private static bool IsVerbose = true;
         public static void Main(string[] args)
         {
             AppDomain.CurrentDomain.UnhandledException += ExcecptionHandler;
@@ -29,6 +33,15 @@ namespace HyperVTools
                 if (args[i] == "-cluster") { 
                     IsCluster = true;
                     ClusterName = args[i + 1];
+                }
+                if (args[i] == "-polltime")
+                {
+                    try { string _ = args[i + 1]; } catch{ Console.WriteLine("Invalid Or Missing Poll Time");Environment.Exit(-1); }
+                    POLL_TIME = Convert.ToInt32(args[i + 1]);
+                }
+                if (args[i] == "-verbose")
+                {
+                    IsVerbose = true;
                 }
             }
             NodeServers = GetServers();
@@ -54,7 +67,24 @@ namespace HyperVTools
                 Console.WriteLine();
             }
             Console.ForegroundColor = ConsoleColor.White;
-            Thread.Sleep(1000);
+            //Now the fun begins
+            BigInteger _internal_counter = 0;
+            List<VirtualMachine> Processable_VMs = new();
+            while (true)
+            {
+                foreach (KeyValuePair<Server,List<VirtualMachine>> entry in ServerToVM) {
+                    Processable_VMs = PollVirtualMachineStatus(entry);
+                    Console.WriteLine();
+                    foreach (VirtualMachine _vm in Processable_VMs)
+                    {
+                        Console.WriteLine($"VM: {_vm.FriendlyName} is in a state for processing");
+                    }
+                    Console.WriteLine();
+                }
+                
+                _internal_counter++;
+                Thread.Sleep(POLL_TIME);
+            }
         }
         /// <summary>
         /// The Function that logs the error without causing the whole program to crash
@@ -83,6 +113,7 @@ namespace HyperVTools
                     }
                 }
                 servers.Add(new Server(Environment.GetEnvironmentVariable("COMPUTERNAME").ToUpperInvariant(),num_vms));
+                session.Close();
             }
             else
             {
@@ -111,6 +142,7 @@ namespace HyperVTools
                         Console.WriteLine(e.Message);
                     }
                 }
+                ClusterIdentityCim.Close();
             }
             return servers;
         }
@@ -137,7 +169,90 @@ namespace HyperVTools
                 ulong GB_mem = (ulong)(Cimdata_MEM.Where(m => m.CimInstanceProperties["InstanceID"].Value.ToString() == @$"Microsoft:{VM_LOGICAL_NAME}\4764334d-e001-4176-82ee-5594ec9b530e")).First().CimInstanceProperties["VirtualQuantity"].Value;
                 VirtualMachines.Add(new VirtualMachine(Guid.Parse(VM_LOGICAL_NAME),VM_NAME,(int)num_CPU,(int)(GB_mem / 1024)));
             }
+            NodeSession.Close();
             return VirtualMachines;
+        }
+        /// <summary>
+        /// Polls the given server for all its VMS again, but instead of returning all the them returns a list of the VM that may be actionable against. Will Write to the console if a VM enters a weird state or a backup state in which it will refuse to touch it.
+        /// </summary>
+        /// <param name="server"></param>
+        public static List<VirtualMachine> PollVirtualMachineStatus(KeyValuePair<Server, List<VirtualMachine>> ServerToVMEntry)
+        {
+            List<VirtualMachine> Processable_VirtualMachines = new();
+            CimSession ServerCim = CimSession.Create(ServerToVMEntry.Key.ServerName);
+            IEnumerable<CimInstance> cimdata = ServerCim.EnumerateInstances(CIM_VRTNS,CIM_VMCLASS);
+            foreach (CimInstance instance in cimdata)
+            {
+                if (instance.CimInstanceProperties["ElementName"].Value.ToString() == ServerToVMEntry.Key.ServerName)
+                {
+                    continue;
+                }
+                ushort[] opstat = (ushort[])instance.CimInstanceProperties["OperationalStatus"].Value;
+                if (opstat.Length > 1)
+                {
+                    Console.WriteLine($"VM: {instance.CimInstanceProperties["ElementName"].Value} has a sub opcode of {opstat[1]}");
+                    //this snippet will enumerate the VMs in the list to find the ones polled and mark the ones doing things like backing up as ignored to prevent this program from making their state worse
+                    foreach (VirtualMachine vm in ServerToVMEntry.Value.Where(v => v.Id.ToString() == instance.CimInstanceProperties["Name"].Value.ToString()))
+                    {
+                        vm.IsIgnored = true;
+                    }
+                }
+                else if (opstat[0] != 2)
+                {
+                    Console.WriteLine($"VM: {instance.CimInstanceProperties["ElementName"].Value} is unhealthy with an opcode of {opstat[0]}");
+                    foreach (VirtualMachine vm in ServerToVMEntry.Value.Where(v => v.Id.ToString() == instance.CimInstanceProperties["Name"].Value.ToString()))
+                    {
+                        vm.IsIgnored = true;
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"VM: {instance.CimInstanceProperties["ElementName"].Value} is healthy");
+                    foreach (VirtualMachine vm in ServerToVMEntry.Value.Where(v => v.Id.ToString().ToUpperInvariant() == instance.CimInstanceProperties["Name"].Value.ToString()))
+                    {
+                        vm.IsIgnored = false;
+                    }
+                }
+            }
+            var filtered_cim_disabled_VMs = cimdata.Where(cd => (cd.CimInstanceProperties["EnabledState"].Value.ToString() == "3" || cd.CimInstanceProperties["EnabledState"].Value.ToString() == "4"));
+            //What in the world was i thinking, i just need a list of all VMS that have gone into the shutdown state or powered off state, while also not being a VM thats in an ignored state
+            Processable_VirtualMachines = ServerToVMEntry.Value.Where(vm => ((!vm.IsIgnored) && (filtered_cim_disabled_VMs.Where(cid => cid.CimInstanceProperties["Name"].Value.ToString() == vm.Id.ToString().ToUpperInvariant()).Any()))).ToList();
+            ServerCim.Close();
+            return Processable_VirtualMachines;
+        }
+        /// <summary>
+        /// Using the provided server that it knows the VMS might fully lives on  attempts to update the hardware if it has fully entered the stopped state.
+        /// </summary>
+        /// <param name="server"></param>
+        /// <param name="Process_VMs"></param>
+        public static void ProcessVMs(string server, List<VirtualMachine> Process_VMs)
+        {
+
+        }
+        /// <summary>
+        /// Probably Never going to be used but to not forget the way to invoke a CIM method against an object, if it is used bewarned its the same as unplugging the computer/turning off the VM not cleanly
+        /// </summary>
+        /// <param name="server"></param>
+        /// <param name="VM"></param>
+        /// <returns></returns>
+        public static int KillVM(string server,VirtualMachine VM) { 
+            CimSession session = CimSession.Create(server);
+            IEnumerable<CimInstance> cimInstances = session.EnumerateInstances(CIM_VRTNS,CIM_VMCLASS);
+            CimInstance VMInstance;
+            try
+            {
+                VMInstance = cimInstances.Where(e => e.CimInstanceProperties["Name"].Value.ToString().ToUpperInvariant() == VM.Id.ToString().ToUpperInvariant()).First();
+            }
+            catch (Exception ex)
+            {
+                Debugger.Log(1,"",$"Failed to retrive VM {VM.FriendlyName} from Server {server} exception is {ex.Message}");
+                return -1;
+            }
+            CimMethodParametersCollection method_params = new CimMethodParametersCollection();
+            CimMethodParameter param = CimMethodParameter.Create("RequestedState",3,CimType.UInt16,CimFlags.None);
+            method_params.Add(param);
+            var result = session.InvokeMethod(VMInstance,"RequestStateChange",method_params);
+            return (int)result.ReturnValue.Value;
         }
     }
 }
