@@ -1,7 +1,9 @@
 ﻿using System.Collections;
 using System.Diagnostics;
 using System.Numerics;
+using System.Text;
 using Microsoft.Management.Infrastructure;
+using Microsoft.Management.Infrastructure.Serialization;
 namespace HyperVTools
 {
     class HyperVTools
@@ -13,7 +15,7 @@ namespace HyperVTools
         private static Dictionary<Server, List<VirtualMachine>> ServerToVM = new();
         private static Boolean IsCluster = false;
 #pragma warning restore CS8618
-        //In the event we need to touch WMI/CIM to talk to the hypervisor(s) (very likely)
+        //In the event we need to touch WMI/CIM to talk to the hypervisor(s) (it is ONLY CIM) (OH MY GOD THERES WAY TO MUCH CIM)
         private const string CIM_VRTNS = "root/virtualization/v2";
         private const string CIM_VMCLASS = "Msvm_ComputerSystem"; //The HyperVisors Root partition shows up in this class make sure to ignore it
         private const string CIM_VCPUCLASS = "Msvm_ProcessorSettingData";
@@ -21,6 +23,67 @@ namespace HyperVTools
         private const string CIM_CLSVRTNS = "root/HyperVCluster/v2";
         private const string CIM_CLRNS = "root/mscluster";
         private const string CIM_CLNODECLASS = "MSCluster_Node";
+        private const string CIM_VSMSCLASS = "CIM_VirtualSystemManagementService";
+        private const string CIM_VSMSSETTINGCLASS = "CIM_ResourceAllocationSettingData";
+
+
+
+        private static readonly string MSVM_PROCSETTINGXMLSTRUCTURE = "<INSTANCE CLASSNAME=\"Msvm_ProcessorSettingData\">" +
+                                                                      "<PROPERTY NAME=\"Caption\" TYPE=\"string\"><VALUE>Processor</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"Description\" TYPE=\"string\"><VALUE>Settings for Microsoft Virtual Processor.</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"ElementName\" TYPE=\"string\"><VALUE>Processor</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"InstanceID\" TYPE=\"string\"><VALUE>Microsoft:7F236D92-053F-4EB6-82E1-A76F1E443CE9\\b637f346-6a0e-4dec-af52-bd70cb80a21d\\0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"Address\" TYPE=\"string\"></PROPERTY><PROPERTY NAME=\"AddressOnParent\" TYPE=\"string\"></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"AllocationUnits\" TYPE=\"string\"><VALUE>percent / 1000</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"AutomaticAllocation\" TYPE=\"boolean\"><VALUE>true</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"AutomaticDeallocation\" TYPE=\"boolean\"><VALUE>true</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY.ARRAY NAME=\"Connection\" TYPE=\"string\"></PROPERTY.ARRAY>" +
+                                                                      "<PROPERTY NAME=\"ConsumerVisibility\" TYPE=\"uint16\"><VALUE>3</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY.ARRAY NAME=\"HostResource\" TYPE=\"string\"></PROPERTY.ARRAY>" +
+                                                                      "<PROPERTY NAME=\"Limit\" TYPE=\"uint64\"><VALUE>100000</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"MappingBehavior\" TYPE=\"uint16\"></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"OtherResourceType\" TYPE=\"string\"></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"Parent\" TYPE=\"string\"></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"PoolID\" TYPE=\"string\"><VALUE></VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"Reservation\" TYPE=\"uint64\"><VALUE>0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"ResourceSubType\" TYPE=\"string\"><VALUE>Microsoft:Hyper-V:Processor</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"ResourceType\" TYPE=\"uint16\"><VALUE>3</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"VirtualQuantity\" TYPE=\"uint64\" MODIFIED=\"TRUE\"><VALUE>12</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"VirtualQuantityUnits\" TYPE=\"string\"><VALUE>count</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"Weight\" TYPE=\"uint32\"><VALUE>100</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"AllowACountMCount\" TYPE=\"boolean\"><VALUE>true</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"ApicMode\" TYPE=\"uint8\"><VALUE>0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"CpuBrandString\" TYPE=\"string\"><VALUE></VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"CpuGroupId\" TYPE=\"string\"><VALUE>00000000-0000-0000-0000-000000000000</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"DisableSpeculationControls\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnableHostResourceProtection\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnableLegacyApicMode\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnablePageShattering\" TYPE=\"uint8\"><VALUE>2</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnablePerfmonArchPmu\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnablePerfmonIpt\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnablePerfmonLbr\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnablePerfmonPebs\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnablePerfmonPmu\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnableSocketTopology\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnlightenmentSet\" TYPE=\"string\"></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"ExposeVirtualizationExtensions\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"ExtendedVirtualizationExtensions\" TYPE=\"uint32\"><VALUE>0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"HideHypervisorPresent\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"HwThreadsPerCore\" TYPE=\"uint64\"><VALUE>0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"L3CacheWays\" TYPE=\"uint32\"><VALUE>0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"L3ProcessorDistributionPolicy\" TYPE=\"uint8\"><VALUE>0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"LimitCPUID\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"LimitProcessorFeatures\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"LimitProcessorFeaturesMode\" TYPE=\"uint8\"><VALUE>0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"MaxClusterCountPerSocket\" TYPE=\"uint32\"><VALUE>4294967295</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"MaxHwIsolatedGuests\" TYPE=\"uint32\"><VALUE>0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"MaxNumaNodesPerSocket\" TYPE=\"uint64\"><VALUE>1</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"MaxProcessorCountPerL3\" TYPE=\"uint32\"><VALUE>4294967295</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"MaxProcessorsPerNumaNode\" TYPE=\"uint64\"><VALUE>20</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"PerfCpuFreqCapMhz\" TYPE=\"uint32\"><VALUE>0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"ProcessorFeatureSet\" TYPE=\"string\"></PROPERTY></INSTANCE>";
+
+
 
         private const string FORMAT_SPACE = "                                ";
         private static int POLL_TIME = 100;
@@ -78,6 +141,7 @@ namespace HyperVTools
                     foreach (VirtualMachine _vm in Processable_VMs)
                     {
                         Console.WriteLine($"VM: {_vm.FriendlyName} is in a state for processing");
+                        ChangeVMhardware(entry.Key.ServerName,_vm);
                     }
                     Console.WriteLine();
                 }
@@ -253,6 +317,259 @@ namespace HyperVTools
             method_params.Add(param);
             var result = session.InvokeMethod(VMInstance,"RequestStateChange",method_params);
             return (int)result.ReturnValue.Value;
+        }
+        /// <summary>
+        /// This is an unholy abominiation to the eyes of the reader, pray tell why your here i hope you leave quickly before ending like the one crazy guy meme whos pointing at a whole heck of a lot of paper
+        /// </summary>
+        /// <param name="server"></param>
+        /// <param name="vm"></param>
+        private static void ChangeVMhardware(string server, VirtualMachine vm)
+        {
+            CimSession cimSession = CimSession.Create(server);
+            CimInstance vsms = cimSession.EnumerateInstances(CIM_VRTNS,CIM_VSMSCLASS).Where(m => m.CimInstanceProperties["Name"].Value.ToString() == "vmms").First();
+            var thing = vsms.CimClass.CimClassMethods["ModifyResourceSettings"].Parameters;
+            string CIM_Q = $"SELECT * FROM Msvm_ComputerSystem WHERE ElementName = '{vm.FriendlyName}'";
+            CimInstance VMRef;
+            try { VMRef = cimSession.QueryInstances(CIM_VRTNS, "WQL", CIM_Q).First(); } catch (Exception ex) { Console.WriteLine($"Failed to retrive VM {ex.Message}"); return; };
+            CimMethodParametersCollection cimMethodParameters = new CimMethodParametersCollection();
+            CimMethodParameter? CPU_param = null;
+            //I have to null these so i can't use an uninitalized value angering the compiler :(
+            CimInstance? ciminstance_CPU_ALLOC = null;
+            CimInstance? ciminstance_MEM_ALLOC = null;
+            string string_CPU_ALLOC = "";
+            string string_MEM_ALLOC = "";
+            int _array_len = 0;
+            //What in the unholy monster do i have to make to write settings down into the computer
+            if (vm.PendingCoreCount > 0)
+            {
+                //"Msvm_SystemSettingData"
+                IEnumerable<CimInstance> _temp = cimSession.EnumerateInstances(CIM_VRTNS, CIM_VSMSSETTINGCLASS).Where(c => c.CimInstanceProperties["ElementName"].Value != null && c.CimInstanceProperties["ElementName"].Value.ToString().ToUpperInvariant() == "PROCESSOR");
+                ciminstance_CPU_ALLOC =  _temp.Where(c => c.CimInstanceProperties["InstanceID"].Value.ToString() == @$"Microsoft:{vm.Id.ToString().ToUpperInvariant()}\b637f346-6a0e-4dec-af52-bd70cb80a21d\0").First();
+                CimInstance vmsettingsInstance = cimSession.EnumerateAssociatedInstances(CIM_VRTNS,VMRef,null , "Msvm_VirtualSystemSettingData", null,null,null).First();
+                CimInstance processsettings = cimSession.EnumerateAssociatedInstances(CIM_VRTNS,vmsettingsInstance, null, "CIM_ResourceAllocationSettingData", null,null,null).Where(e => e.CimInstanceProperties["ElementName"].Value.ToString().ToUpperInvariant() == "PROCESSOR").First();
+                processsettings.CimInstanceProperties["VirtualQuantity"].Value = vm.PendingCoreCount;
+                Console.WriteLine(processsettings.ToString());
+                //cimMethodParameters.Add(CimMethodParameter.Create("ResourceSettings", new[] { processsettings.ToString() }, CimType.StringArray, CimFlags.None));
+                //string CIM_STRING = $"Msvm_ProcessorSettingData:" +
+                //    $"Caption = Processor," +
+                //    $"Description = \"Settings for Microsoft Virtual Processor\"" +
+                //    $"ElementName = \"Processor\"" +
+                //    $"InstanceID = \"{processsettings.CimInstanceProperties["InstanceID"].Value}\"," +
+                //    $"Address," +
+                //    $"AddressOnParent," +
+                //    $"AllocationUnits = \"percent / 1000\"," +
+                //    $"AutomaticAllocation = True," +
+                //    $"AutomaticDeallocation = True," +
+                //    $"Connection," +
+                //    $"ConsumerVisibility = 3," +
+                //    $"Limit = 100000," +
+                //    $"MappingBehavior," +
+                //    $"OtherResourceType," +
+                //    $"Parent," +
+                //    $"PoolID = \"\"," +
+                //    $"ResourceSubType = \"Microsoft:Hyper-V:Processor\"," +
+                //    $"ResourceType = 3," +
+                //    $"VirtualQuantity = {processsettings.CimInstanceProperties["VirtualQuantity"].Value}," +
+                //    $"VirtualQuantityUnits = \"count\"," +
+                //    $"Weight = 100," +
+                //    $"AllowACountMCount = True," +
+                //    $"ApicMode = 0," +
+                //    $"CpuBrandString = \"\"," +
+                //    $"CpuGroupId = \"00000000-0000-0000-0000-000000000000\"," +
+                //    $"DisableSpeculationControls = False," +
+                //    $"EnableHostResourceProtection = False," +
+                //    $"EnableLegacyApicMode = False," +
+                //    $"EnablePageShattering = 2," +
+                //    $"EnablePerfmonArchPmu = False," +
+                //    $"EnablePerfmonIpt = False," +
+                //    $"EnablePerfmonLbr = False," +
+                //    $"EnablePerfmonPebs = False," +
+                //    $"EnablePerfmonPmu = False," +
+                //    $"EnableSocketTopology = False," +
+                //    $"EnlightenmentSet," +
+                //    $"ExposeVirtualizationExtentions = False," +
+                //    $"ExtendedVirtualizationExtensions = 0," +
+                //    $"HideHypervisorPresent = False," +
+                //    $"HwThreadsPerCore = 0," +
+                //    $"L3CacheWays = 0," +
+                //    $"L3ProcessorDistributionPolicy = 0," +
+                //    $"LimitCPUID = False," +
+                //    $"LimitProcessorFeatures = False," +
+                //    $"LimitProcessorFeaturesMode = 0," +
+                //    $"MaxClusterCountPerSocket = 4294967295," +
+                //    $"MaxHwIsolatedGuests = 0," +
+                //    $"MaxNumaNodesPerSocket = 1," +
+                //    $"MaxProcessorCounterPerL3 = 4294967295," +
+                //    $"MaxProcessorsPerNumaNode = 20," +
+                //    $"PerfCpuFreqCapMhz = 0," +
+                //    $"ProcessorFeatureSet";
+                //string CIM_STRING = $"CIM_ResourceAllocationSettingData: (" +
+                //    $"Caption = \"Processor\"" +
+                //    $"Description" +
+                //    $"InstanceID = {processsettings.CimInstanceProperties["InstanceID"].Value}" +
+                //    $"ElementName = \"Processor\"" +
+                //    $"ResourceType = 3," +
+                //    $"OtherResourceType," +
+                //    $"ResourceSubType = \"Microsoft:Hyper-V:Processor\"," +
+                //    $"PoolID = \"\"," +
+                //    $"ConsumerVisibility = 3," +
+                //    $"HostResource," +
+                //    $"AllocationUnits," +
+                //    $"VirtualQuantity = {processsettings.CimInstanceProperties["VirtualQuantity"].Value}," +
+                //    $"Reservation = 0," +
+                //    $"Limit = 100000," +
+                //    $"Weight = 100," +
+                //    $"AutomaticAllocation = True," +
+                //    $"AutomaticDeallocation = True," +
+                //    $"Parent," +
+                //    $"Connection," +
+                //    $"Address," +
+                //    $"MappingBehavior," +
+                //    $"AddressOnParent," +
+                //    $"VirtualQuantityUnits = \"count\"" +
+                //    $")";
+                //CimInstance out_resourceSetting = new("CIM_ResourceAllocationSettingData");
+                //CimInstance out_concretejob = new("Cim_ConcreteJob");
+                string CIM_STRING = GenerateHyperVXML(vm,VirtualMachine.HardwareType.CPU);
+                cimMethodParameters.Add(CimMethodParameter.Create("ResourceSettings", new[] { CIM_STRING }, CimType.StringArray, CimFlags.In));
+            //    cimMethodParameters.Add(CimMethodParameter.Create("ResultingResourceSettings", out_resourceSetting, CimType.ReferenceArray, CimFlags.Out));
+            //    cimMethodParameters.Add(CimMethodParameter.Create("Job",out_concretejob,CimType.Reference,CimFlags.Out));
+            }
+            if (vm.PendingGBMemory > 0)
+            {
+                ciminstance_MEM_ALLOC = cimSession.EnumerateInstances(CIM_VRTNS, CIM_VSMSSETTINGCLASS).Where(c => (c.CimInstanceProperties["ElementName"].Value != null && c.CimInstanceProperties["ElementName"].Value.ToString().ToUpperInvariant() == "MEMORY" && c.CimInstanceProperties["InstanceID"].Value.ToString() == @$"Microsoft:{vm.Id.ToString().ToUpperInvariant()}\4764334d-e001-4176-82ee-5594ec9b530e")).First(); ;
+            }
+            if (ciminstance_CPU_ALLOC != null)
+            {
+                
+                //ciminstance_CPU_ALLOC.CimInstanceProperties.Add(CimProperty.Create("ElementName","Processor",CimType.String,CimFlags.None));
+                //ciminstance_CPU_ALLOC.CimInstanceProperties.Add(CimProperty.Create("VirtualQuantity", vm.PendingCoreCount, CimType.UInt64, CimFlags.None));
+                //ciminstance_CPU_ALLOC.CimInstanceProperties["VirtualQuantity"].Value = vm.PendingCoreCount;
+                
+                //CimSerializer serializer = CimSerializer.Create();
+                //cimMethodParameters.Add(CimMethodParameter.Create("ResourceSettings", new[] {System.Text.Encoding.UTF8.GetString(serializer.Serialize(ciminstance_CPU_ALLOC,InstanceSerializationOptions.None)) },CimType.StringArray,CimFlags.None));
+                //cimMethodParameters.Add(CimMethodParameter.Create("ResourceSettings", new[] { System.Text.Json.JsonSerializer.Serialize(ciminstance_CPU_ALLOC.CimInstanceProperties) }, CimType.StringArray, CimFlags.None));
+                //string Json_CPU_serial = System.Text.Json.JsonSerializer.Serialize(ciminstance_CPU_ALLOC);
+                //string[] json_string = new string[1];
+                //json_string[0] = Json_CPU_serial;
+                ////CPU_param = CimMethodParameter.Create("ResourceSettings[]",ciminstance_CPU_ALLOC.CimInstanceProperties.AsEnumerable().ToList(),CimType.StringArray,CimFlags.Parameter);
+                //CPU_param = CimMethodParameter.Create("ResourceSettings[]",json_string, CimType.StringArray, CimFlags.Parameter);
+                //cimMethodParameters.Add(CPU_param);
+                _array_len++;
+            }
+            if (ciminstance_MEM_ALLOC != null)
+            {
+                ciminstance_MEM_ALLOC.CimInstanceProperties["VirtualQuantity"].Value = vm.PendingGBMemory * 1024;
+                _array_len++;
+            }
+            if (cimMethodParameters.Count > 0)
+            {
+                var result = cimSession.InvokeMethod(vsms,"ModifyResourceSettings",cimMethodParameters);
+                if ((uint)result.ReturnValue.Value == 0)
+                {
+                    if (vm.PendingCoreCount != 0) {
+                        vm.UpdateVirtualMachine("CPU", vm.PendingCoreCount);
+                    }
+                    if (vm.PendingGBMemory != 0)
+                    {
+                        vm.UpdateVirtualMachine("MEMORY",vm.PendingGBMemory);
+                    }
+                    vm.PendingCoreCount = 0;
+                    vm.PendingGBMemory = 0;
+                }
+                if (IsVerbose)
+                {
+                    Console.WriteLine(result.ReturnValue.Value);
+                }
+            }
+            cimSession.Close();
+        }
+        private static string SerializeCimInstance(CimInstance instance,VirtualMachine.HardwareType SettingType)
+        {
+            StringBuilder stringBuilder = new StringBuilder();
+            if (SettingType == VirtualMachine.HardwareType.CPU)
+            {
+                stringBuilder.AppendLine("<INSTANCE CLASSNAME=\"Msvm_ProcessorSettingData\">");
+            }else if ( SettingType == VirtualMachine.HardwareType.MEMORY)
+            {
+                stringBuilder.AppendLine("<INSTANCE CLASSNAME=\"Msvm_MemorySettingData\"");
+            }
+            foreach (var property in instance.CimInstanceProperties)
+            {
+                if (property.Value != null)
+                {
+                    stringBuilder.AppendLine($"  <PROPERTY NAME=\"{ property.Name}\" TYPE=\"string\"");
+                    stringBuilder.AppendLine($"    <VALUE>{property.Value}</VALUE>");
+                    stringBuilder.AppendLine("  </PROPERTY");
+                }
+            }
+            stringBuilder.AppendLine("</INSTANCE>");
+            return stringBuilder.ToString();
+        }
+        private static string GenerateHyperVXML(VirtualMachine vm,VirtualMachine.HardwareType settingtype)
+        {
+            if (settingtype == VirtualMachine.HardwareType.CPU)
+            {
+                return                                                "<INSTANCE CLASSNAME=\"Msvm_ProcessorSettingData\">" +
+                                                                      "<PROPERTY NAME=\"Caption\" TYPE=\"string\"><VALUE>Processor</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"Description\" TYPE=\"string\"><VALUE>Settings for Microsoft Virtual Processor.</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"ElementName\" TYPE=\"string\"><VALUE>Processor</VALUE></PROPERTY>" +
+                                                                      $"<PROPERTY NAME=\"InstanceID\" TYPE=\"string\"><VALUE>Microsoft:{vm.Id.ToString().ToUpperInvariant()}\\b637f346-6a0e-4dec-af52-bd70cb80a21d\\0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"Address\" TYPE=\"string\"></PROPERTY><PROPERTY NAME=\"AddressOnParent\" TYPE=\"string\"></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"AllocationUnits\" TYPE=\"string\"><VALUE>percent / 1000</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"AutomaticAllocation\" TYPE=\"boolean\"><VALUE>true</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"AutomaticDeallocation\" TYPE=\"boolean\"><VALUE>true</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY.ARRAY NAME=\"Connection\" TYPE=\"string\"></PROPERTY.ARRAY>" +
+                                                                      "<PROPERTY NAME=\"ConsumerVisibility\" TYPE=\"uint16\"><VALUE>3</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY.ARRAY NAME=\"HostResource\" TYPE=\"string\"></PROPERTY.ARRAY>" +
+                                                                      "<PROPERTY NAME=\"Limit\" TYPE=\"uint64\"><VALUE>100000</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"MappingBehavior\" TYPE=\"uint16\"></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"OtherResourceType\" TYPE=\"string\"></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"Parent\" TYPE=\"string\"></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"PoolID\" TYPE=\"string\"><VALUE></VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"Reservation\" TYPE=\"uint64\"><VALUE>0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"ResourceSubType\" TYPE=\"string\"><VALUE>Microsoft:Hyper-V:Processor</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"ResourceType\" TYPE=\"uint16\"><VALUE>3</VALUE></PROPERTY>" +
+                                                                      $"<PROPERTY NAME=\"VirtualQuantity\" TYPE=\"uint64\" MODIFIED=\"TRUE\"><VALUE>{vm.PendingCoreCount}</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"VirtualQuantityUnits\" TYPE=\"string\"><VALUE>count</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"Weight\" TYPE=\"uint32\"><VALUE>100</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"AllowACountMCount\" TYPE=\"boolean\"><VALUE>true</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"ApicMode\" TYPE=\"uint8\"><VALUE>0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"CpuBrandString\" TYPE=\"string\"><VALUE></VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"CpuGroupId\" TYPE=\"string\"><VALUE>00000000-0000-0000-0000-000000000000</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"DisableSpeculationControls\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnableHostResourceProtection\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnableLegacyApicMode\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnablePageShattering\" TYPE=\"uint8\"><VALUE>2</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnablePerfmonArchPmu\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnablePerfmonIpt\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnablePerfmonLbr\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnablePerfmonPebs\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnablePerfmonPmu\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnableSocketTopology\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"EnlightenmentSet\" TYPE=\"string\"></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"ExposeVirtualizationExtensions\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"ExtendedVirtualizationExtensions\" TYPE=\"uint32\"><VALUE>0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"HideHypervisorPresent\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"HwThreadsPerCore\" TYPE=\"uint64\"><VALUE>0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"L3CacheWays\" TYPE=\"uint32\"><VALUE>0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"L3ProcessorDistributionPolicy\" TYPE=\"uint8\"><VALUE>0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"LimitCPUID\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"LimitProcessorFeatures\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"LimitProcessorFeaturesMode\" TYPE=\"uint8\"><VALUE>0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"MaxClusterCountPerSocket\" TYPE=\"uint32\"><VALUE>4294967295</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"MaxHwIsolatedGuests\" TYPE=\"uint32\"><VALUE>0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"MaxNumaNodesPerSocket\" TYPE=\"uint64\"><VALUE>1</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"MaxProcessorCountPerL3\" TYPE=\"uint32\"><VALUE>4294967295</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"MaxProcessorsPerNumaNode\" TYPE=\"uint64\"><VALUE>20</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"PerfCpuFreqCapMhz\" TYPE=\"uint32\"><VALUE>0</VALUE></PROPERTY>" +
+                                                                      "<PROPERTY NAME=\"ProcessorFeatureSet\" TYPE=\"string\"></PROPERTY></INSTANCE>";
+            }
+            if (settingtype == VirtualMachine.HardwareType.MEMORY)
+            {
+                return "Haven't formated the XML for the Memory : (";
+            }
+            return "No implement setting type given";
         }
     }
 }
