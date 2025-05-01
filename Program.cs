@@ -27,7 +27,7 @@ namespace HyperVTools
         private const string CIM_VSMSSETTINGCLASS = "CIM_ResourceAllocationSettingData";
 
 
-
+        //A Spare Copy of the XML just incase enbedded in the file just in case
         private static readonly string MSVM_PROCSETTINGXMLSTRUCTURE = "<INSTANCE CLASSNAME=\"Msvm_ProcessorSettingData\">" +
                                                                       "<PROPERTY NAME=\"Caption\" TYPE=\"string\"><VALUE>Processor</VALUE></PROPERTY>" +
                                                                       "<PROPERTY NAME=\"Description\" TYPE=\"string\"><VALUE>Settings for Microsoft Virtual Processor.</VALUE></PROPERTY>" +
@@ -107,6 +107,13 @@ namespace HyperVTools
                     IsVerbose = true;
                 }
             }
+
+            Thread HTTP = new(() => { 
+            
+            
+            
+            
+            });
             NodeServers = GetServers();
             //With the Current Nodes, we now need to actually get each servers VMS and the current state and periodically poll the node for updates
             foreach (Server server in NodeServers)
@@ -122,10 +129,10 @@ namespace HyperVTools
             Console.ForegroundColor = ConsoleColor.Cyan;
             foreach (Server server in ServerToVM.Keys)
             {
-                Console.WriteLine($"{server.ServerName}");
+                //Console.WriteLine($"{server.ServerName}");
                 foreach (VirtualMachine vm in ServerToVM[server])
                 {
-                    Console.WriteLine($"      {FORMAT_SPACE}{vm.FriendlyName}{FORMAT_SPACE.Substring(0,FORMAT_SPACE.Length - vm.FriendlyName.Length)}{"      "}{vm.Id}");
+                    Console.WriteLine($"{server.ServerName}{FORMAT_SPACE.Substring(server.ServerName.Length - 6)}{vm.FriendlyName}{FORMAT_SPACE.Substring(0,FORMAT_SPACE.Length - vm.FriendlyName.Length)}{"      "}{vm.Id}");
                 }
                 Console.WriteLine();
             }
@@ -567,7 +574,7 @@ namespace HyperVTools
             }
             if (settingtype == VirtualMachine.HardwareType.MEMORY)
             {
-                return "Haven't formated the XML for the Memory : (";
+                throw new NotImplementedException( "Haven't formated the XML for the Memory : (");
             }
             return "No implement setting type given";
         }

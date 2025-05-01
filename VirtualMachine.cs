@@ -9,7 +9,7 @@
         public Guid Id { get; }
         public string FriendlyName { get; }
         public int CoreCount { get; private set; }
-        public int PendingCoreCount { get; set; } = 10;
+        public int PendingCoreCount { get; set; } = 0;
         public int GBMemory { get; private set; }
         public int PendingGBMemory { get; set; } = 0;
         public bool IsIgnored { get; set;}

@@ -1,0 +1,55 @@
+<INSTANCE CLASSNAME=\"Msvm_ProcessorSettingData\">
+    <PROPERTY NAME=\"Caption\" TYPE=\"string\"><VALUE>Processor</VALUE></PROPERTY>
+    <PROPERTY NAME=\"Description\" TYPE=\"string\"><VALUE>Settings for Microsoft Virtual Processor.</VALUE></PROPERTY>
+    <PROPERTY NAME=\"ElementName\" TYPE=\"string\"><VALUE>Processor</VALUE></PROPERTY>
+    <PROPERTY NAME=\"InstanceID\" TYPE=\"string\"><VALUE>Microsoft:"YOURVMSIDHERE"\\b637f346-6a0e-4dec-af52-bd70cb80a21d\\0</VALUE></PROPERTY>
+    <PROPERTY NAME=\"Address\" TYPE=\"string\"></PROPERTY><PROPERTY NAME=\"AddressOnParent\" TYPE=\"string\"></PROPERTY>
+    <PROPERTY NAME=\"AllocationUnits\" TYPE=\"string\"><VALUE>percent / 1000</VALUE></PROPERTY>
+    <PROPERTY NAME=\"AutomaticAllocation\" TYPE=\"boolean\"><VALUE>true</VALUE></PROPERTY>
+    <PROPERTY NAME=\"AutomaticDeallocation\" TYPE=\"boolean\"><VALUE>true</VALUE></PROPERTY>
+    <PROPERTY.ARRAY NAME=\"Connection\" TYPE=\"string\"></PROPERTY.ARRAY>
+    <PROPERTY NAME=\"ConsumerVisibility\" TYPE=\"uint16\"><VALUE>3</VALUE></PROPERTY>
+    <PROPERTY.ARRAY NAME=\"HostResource\" TYPE=\"string\"></PROPERTY.ARRAY>
+    <PROPERTY NAME=\"Limit\" TYPE=\"uint64\"><VALUE>100000</VALUE></PROPERTY>
+    <PROPERTY NAME=\"MappingBehavior\" TYPE=\"uint16\"></PROPERTY>
+    <PROPERTY NAME=\"OtherResourceType\" TYPE=\"string\"></PROPERTY>
+    <PROPERTY NAME=\"Parent\" TYPE=\"string\"></PROPERTY>
+    <PROPERTY NAME=\"PoolID\" TYPE=\"string\"><VALUE></VALUE></PROPERTY>
+    <PROPERTY NAME=\"Reservation\" TYPE=\"uint64\"><VALUE>0</VALUE></PROPERTY>
+    <PROPERTY NAME=\"ResourceSubType\" TYPE=\"string\"><VALUE>Microsoft:Hyper-V:Processor</VALUE></PROPERTY>
+    <PROPERTY NAME=\"ResourceType\" TYPE=\"uint16\"><VALUE>3</VALUE></PROPERTY>
+    <PROPERTY NAME=\"VirtualQuantity\" TYPE=\"uint64\" MODIFIED=\"TRUE\"><VALUE>"NEWVMCOUNTHERE"</VALUE></PROPERTY>
+    <PROPERTY NAME=\"VirtualQuantityUnits\" TYPE=\"string\"><VALUE>count</VALUE></PROPERTY>
+    <PROPERTY NAME=\"Weight\" TYPE=\"uint32\"><VALUE>100</VALUE></PROPERTY>
+    <PROPERTY NAME=\"AllowACountMCount\" TYPE=\"boolean\"><VALUE>true</VALUE></PROPERTY>
+    <PROPERTY NAME=\"ApicMode\" TYPE=\"uint8\"><VALUE>0</VALUE></PROPERTY>
+    <PROPERTY NAME=\"CpuBrandString\" TYPE=\"string\"><VALUE></VALUE></PROPERTY>
+    <PROPERTY NAME=\"CpuGroupId\" TYPE=\"string\"><VALUE>00000000-0000-0000-0000-000000000000</VALUE></PROPERTY>
+    <PROPERTY NAME=\"DisableSpeculationControls\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>
+    <PROPERTY NAME=\"EnableHostResourceProtection\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>
+    <PROPERTY NAME=\"EnableLegacyApicMode\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>
+    <PROPERTY NAME=\"EnablePageShattering\" TYPE=\"uint8\"><VALUE>2</VALUE></PROPERTY>
+    <PROPERTY NAME=\"EnablePerfmonArchPmu\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>
+    <PROPERTY NAME=\"EnablePerfmonIpt\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>
+    <PROPERTY NAME=\"EnablePerfmonLbr\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>
+    <PROPERTY NAME=\"EnablePerfmonPebs\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>
+    <PROPERTY NAME=\"EnablePerfmonPmu\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>
+    <PROPERTY NAME=\"EnableSocketTopology\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>
+    <PROPERTY NAME=\"EnlightenmentSet\" TYPE=\"string\"></PROPERTY>
+    <PROPERTY NAME=\"ExposeVirtualizationExtensions\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>
+    <PROPERTY NAME=\"ExtendedVirtualizationExtensions\" TYPE=\"uint32\"><VALUE>0</VALUE></PROPERTY>
+    <PROPERTY NAME=\"HideHypervisorPresent\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>
+    <PROPERTY NAME=\"HwThreadsPerCore\" TYPE=\"uint64\"><VALUE>0</VALUE></PROPERTY>
+    <PROPERTY NAME=\"L3CacheWays\" TYPE=\"uint32\"><VALUE>0</VALUE></PROPERTY>
+    <PROPERTY NAME=\"L3ProcessorDistributionPolicy\" TYPE=\"uint8\"><VALUE>0</VALUE></PROPERTY>
+    <PROPERTY NAME=\"LimitCPUID\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>
+    <PROPERTY NAME=\"LimitProcessorFeatures\" TYPE=\"boolean\"><VALUE>false</VALUE></PROPERTY>
+    <PROPERTY NAME=\"LimitProcessorFeaturesMode\" TYPE=\"uint8\"><VALUE>0</VALUE></PROPERTY>
+    <PROPERTY NAME=\"MaxClusterCountPerSocket\" TYPE=\"uint32\"><VALUE>4294967295</VALUE></PROPERTY>
+    <PROPERTY NAME=\"MaxHwIsolatedGuests\" TYPE=\"uint32\"><VALUE>0</VALUE></PROPERTY>
+    <PROPERTY NAME=\"MaxNumaNodesPerSocket\" TYPE=\"uint64\"><VALUE>1</VALUE></PROPERTY>
+    <PROPERTY NAME=\"MaxProcessorCountPerL3\" TYPE=\"uint32\"><VALUE>4294967295</VALUE></PROPERTY>
+    <PROPERTY NAME=\"MaxProcessorsPerNumaNode\" TYPE=\"uint64\"><VALUE>20</VALUE></PROPERTY>
+    <PROPERTY NAME=\"PerfCpuFreqCapMhz\" TYPE=\"uint32\"><VALUE>0</VALUE></PROPERTY>
+    <PROPERTY NAME=\"ProcessorFeatureSet\" TYPE=\"string\"></PROPERTY>
+</INSTANCE>";
