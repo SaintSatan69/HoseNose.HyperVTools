@@ -1,5 +1,6 @@
 ﻿using System.Collections;
 using System.Diagnostics;
+using System.Net;
 using System.Numerics;
 using System.Text;
 using Microsoft.Management.Infrastructure;
@@ -13,6 +14,7 @@ namespace HyperVTools
         private static string ClusterName;
         private static List<Server> NodeServers;
         private static Dictionary<Server, List<VirtualMachine>> ServerToVM = new();
+        private static List<HardwareQueHTTP> QuedRequests = new();
         private static Boolean IsCluster = false;
 #pragma warning restore CS8618
         //In the event we need to touch WMI/CIM to talk to the hypervisor(s) (it is ONLY CIM) (OH MY GOD THERES WAY TO MUCH CIM)
@@ -91,15 +93,17 @@ namespace HyperVTools
         public static void Main(string[] args)
         {
             AppDomain.CurrentDomain.UnhandledException += ExcecptionHandler;
-            for (int i = 0; i < args.Length; i++) {
+            for (int i = 0; i < args.Length; i++)
+            {
 
-                if (args[i] == "-cluster") { 
+                if (args[i] == "-cluster")
+                {
                     IsCluster = true;
                     ClusterName = args[i + 1];
                 }
                 if (args[i] == "-polltime")
                 {
-                    try { string _ = args[i + 1]; } catch{ Console.WriteLine("Invalid Or Missing Poll Time");Environment.Exit(-1); }
+                    try { string _ = args[i + 1]; } catch { Console.WriteLine("Invalid Or Missing Poll Time"); Environment.Exit(-1); }
                     POLL_TIME = Convert.ToInt32(args[i + 1]);
                 }
                 if (args[i] == "-verbose")
@@ -108,11 +112,51 @@ namespace HyperVTools
                 }
             }
 
-            Thread HTTP = new(() => { 
-            
-            
-            
-            
+            Thread HTTP = new(() =>
+            {
+                HttpListener Api = new HttpListener();
+                try
+                {
+                    //We use local host as the client will initiate a remote powershell session over WSMAN/WINRM and invoke a webrequest to localhost and hopefully to this program, WSMAN will handle the auth from the calling place.
+                    Api.Prefixes.Add("http://localhost:6969/");
+                    Api.Start();
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception($"Unable To Start the HTTP Interface needed for people to schedual hardware changes reason is {ex.Message}");
+                }
+                while (true)
+                {
+                    try
+                    {
+                        HttpListenerContext context = Api.GetContext();
+                        if (context.Request.HttpMethod != "POST")
+                        {
+                            //since is meant just to be able to add hardware chances to the que
+                            context.Response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                            context.Response.Close();
+                        }
+                        else
+                        {
+                            Stream request_stream = context.Request.InputStream;
+                            byte[] request_streambytes = new byte[request_stream.Length];
+                            request_stream.ReadExactly(request_streambytes, 0, (int)request_stream.Length);
+                            HardwareQueHTTP? que_resource = System.Text.Json.JsonSerializer.Deserialize<HardwareQueHTTP>(System.Text.Encoding.UTF8.GetString(request_streambytes));
+                            if (que_resource != null)
+                            {
+                                lock (QuedRequests)
+                                {
+                                    QuedRequests.Add(que_resource);
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debugger.Log(1, "", $"Request has failed for reason{ex.Message}");
+                    }
+
+                }
             });
             NodeServers = GetServers();
             //With the Current Nodes, we now need to actually get each servers VMS and the current state and periodically poll the node for updates
@@ -132,7 +176,7 @@ namespace HyperVTools
                 //Console.WriteLine($"{server.ServerName}");
                 foreach (VirtualMachine vm in ServerToVM[server])
                 {
-                    Console.WriteLine($"{server.ServerName}{FORMAT_SPACE.Substring(server.ServerName.Length - 6)}{vm.FriendlyName}{FORMAT_SPACE.Substring(0,FORMAT_SPACE.Length - vm.FriendlyName.Length)}{"      "}{vm.Id}");
+                    Console.WriteLine($"{server.ServerName}{FORMAT_SPACE.Substring(server.ServerName.Length - 6)}{vm.FriendlyName}{FORMAT_SPACE.Substring(0, FORMAT_SPACE.Length - vm.FriendlyName.Length)}{"      "}{vm.Id}");
                 }
                 Console.WriteLine();
             }
@@ -142,17 +186,18 @@ namespace HyperVTools
             List<VirtualMachine> Processable_VMs = new();
             while (true)
             {
-                foreach (KeyValuePair<Server,List<VirtualMachine>> entry in ServerToVM) {
+                foreach (KeyValuePair<Server, List<VirtualMachine>> entry in ServerToVM)
+                {
                     Processable_VMs = PollVirtualMachineStatus(entry);
                     Console.WriteLine();
                     foreach (VirtualMachine _vm in Processable_VMs)
                     {
                         Console.WriteLine($"VM: {_vm.FriendlyName} is in a state for processing");
-                        ChangeVMhardware(entry.Key.ServerName,_vm);
+                        ChangeVMhardware(entry.Key.ServerName, _vm);
                     }
                     Console.WriteLine();
                 }
-                
+
                 _internal_counter++;
                 Thread.Sleep(POLL_TIME);
             }
@@ -162,8 +207,9 @@ namespace HyperVTools
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        public static void ExcecptionHandler(object sender, UnhandledExceptionEventArgs e) {
-            Debugger.Log(1,"",$"Error {e.ExceptionObject} {Environment.NewLine}");
+        public static void ExcecptionHandler(object sender, UnhandledExceptionEventArgs e)
+        {
+            Debugger.Log(1, "", $"Error {e.ExceptionObject} {Environment.NewLine}");
             Console.WriteLine(e.ExceptionObject);
         }
         //Retrives all servers it needs to poke for VMS and their states
@@ -174,7 +220,7 @@ namespace HyperVTools
             {
                 //We still will use the list (saves logic in the future) for the local machine
                 CimSession session = CimSession.Create("localhost");
-                IEnumerable<CimInstance> ClassEnumerator = session.EnumerateInstances(CIM_VRTNS,CIM_VMCLASS);
+                IEnumerable<CimInstance> ClassEnumerator = session.EnumerateInstances(CIM_VRTNS, CIM_VMCLASS);
                 int num_vms = 0;
                 foreach (CimInstance instance in ClassEnumerator)
                 {
@@ -183,21 +229,21 @@ namespace HyperVTools
                         num_vms++;
                     }
                 }
-                servers.Add(new Server(Environment.GetEnvironmentVariable("COMPUTERNAME").ToUpperInvariant(),num_vms));
+                servers.Add(new Server(Environment.GetEnvironmentVariable("COMPUTERNAME").ToUpperInvariant(), num_vms));
                 session.Close();
             }
             else
             {
                 //We Talk to the cluster over CIM to enumerate the Servers and then Get their Number of roles
                 CimSession ClusterIdentityCim = CimSession.Create(ClusterName);
-                IEnumerable<CimInstance> Cluster_instance = ClusterIdentityCim.EnumerateInstances(CIM_CLRNS,CIM_CLNODECLASS);
+                IEnumerable<CimInstance> Cluster_instance = ClusterIdentityCim.EnumerateInstances(CIM_CLRNS, CIM_CLNODECLASS);
                 foreach (CimInstance NodeInstance in Cluster_instance)
                 {
                     try
                     {
                         string Cur_node = NodeInstance.CimInstanceProperties["Name"].Value.ToString().ToUpperInvariant();
                         CimSession NodeIdentityCim = CimSession.Create(Cur_node);
-                        IEnumerable<CimInstance> Node_roles = NodeIdentityCim.EnumerateInstances(CIM_VRTNS,CIM_VMCLASS);
+                        IEnumerable<CimInstance> Node_roles = NodeIdentityCim.EnumerateInstances(CIM_VRTNS, CIM_VMCLASS);
                         int Num_roles = 0;
                         foreach (CimInstance Node_enum_instance in Node_roles)
                         {
@@ -206,10 +252,11 @@ namespace HyperVTools
                                 Num_roles++;
                             }
                         }
-                        servers.Add(new Server(Cur_node,Num_roles));
+                        servers.Add(new Server(Cur_node, Num_roles));
                     }
-                    catch (Exception e) {
-                        Debugger.Log(1,"",$"Node Processing Failed {e.Message}");
+                    catch (Exception e)
+                    {
+                        Debugger.Log(1, "", $"Node Processing Failed {e.Message}");
                         Console.WriteLine(e.Message);
                     }
                 }
@@ -222,8 +269,8 @@ namespace HyperVTools
             List<VirtualMachine> VirtualMachines = new List<VirtualMachine>();
             //the same thing we do to get the amount of VMs when initally learning the servers
             CimSession NodeSession = CimSession.Create(Server);
-            IEnumerable<CimInstance> CimData_VM = NodeSession.EnumerateInstances(CIM_VRTNS,CIM_VMCLASS);
-            IEnumerable<CimInstance> Cimdata_CPU = NodeSession.EnumerateInstances(CIM_VRTNS,CIM_VCPUCLASS);
+            IEnumerable<CimInstance> CimData_VM = NodeSession.EnumerateInstances(CIM_VRTNS, CIM_VMCLASS);
+            IEnumerable<CimInstance> Cimdata_CPU = NodeSession.EnumerateInstances(CIM_VRTNS, CIM_VCPUCLASS);
             IEnumerable<CimInstance> Cimdata_MEM = NodeSession.EnumerateInstances(CIM_VRTNS, CIM_MEMSETTINGS);
             foreach (CimInstance VM_instance in CimData_VM)
             {
@@ -238,7 +285,7 @@ namespace HyperVTools
                 ulong num_CPU = (ulong)(Cimdata_CPU.Where(e => e.CimInstanceProperties["InstanceID"].Value.ToString() == $@"Microsoft:{VM_LOGICAL_NAME}\b637f346-6a0e-4dec-af52-bd70cb80a21d\0")).First().CimInstanceProperties["VirtualQuantity"].Value;
                 //This is even MORE cursed
                 ulong GB_mem = (ulong)(Cimdata_MEM.Where(m => m.CimInstanceProperties["InstanceID"].Value.ToString() == @$"Microsoft:{VM_LOGICAL_NAME}\4764334d-e001-4176-82ee-5594ec9b530e")).First().CimInstanceProperties["VirtualQuantity"].Value;
-                VirtualMachines.Add(new VirtualMachine(Guid.Parse(VM_LOGICAL_NAME),VM_NAME,(int)num_CPU,(int)(GB_mem / 1024)));
+                VirtualMachines.Add(new VirtualMachine(Guid.Parse(VM_LOGICAL_NAME), VM_NAME, (int)num_CPU, (int)(GB_mem / 1024)));
             }
             NodeSession.Close();
             return VirtualMachines;
@@ -251,7 +298,7 @@ namespace HyperVTools
         {
             List<VirtualMachine> Processable_VirtualMachines = new();
             CimSession ServerCim = CimSession.Create(ServerToVMEntry.Key.ServerName);
-            IEnumerable<CimInstance> cimdata = ServerCim.EnumerateInstances(CIM_VRTNS,CIM_VMCLASS);
+            IEnumerable<CimInstance> cimdata = ServerCim.EnumerateInstances(CIM_VRTNS, CIM_VMCLASS);
             foreach (CimInstance instance in cimdata)
             {
                 if (instance.CimInstanceProperties["ElementName"].Value.ToString() == ServerToVMEntry.Key.ServerName)
@@ -263,7 +310,7 @@ namespace HyperVTools
                 {
                     Console.WriteLine($"VM: {instance.CimInstanceProperties["ElementName"].Value} has a sub opcode of {opstat[1]}");
                     //this snippet will enumerate the VMs in the list to find the ones polled and mark the ones doing things like backing up as ignored to prevent this program from making their state worse
-                    foreach (VirtualMachine vm in ServerToVMEntry.Value.Where(v => v.Id.ToString() == instance.CimInstanceProperties["Name"].Value.ToString()))
+                    foreach (VirtualMachine vm in ServerToVMEntry.Value.Where(v => v.Id.ToString().ToUpperInvariant() == instance.CimInstanceProperties["Name"].Value.ToString()))
                     {
                         vm.IsIgnored = true;
                     }
@@ -271,7 +318,7 @@ namespace HyperVTools
                 else if (opstat[0] != 2)
                 {
                     Console.WriteLine($"VM: {instance.CimInstanceProperties["ElementName"].Value} is unhealthy with an opcode of {opstat[0]}");
-                    foreach (VirtualMachine vm in ServerToVMEntry.Value.Where(v => v.Id.ToString() == instance.CimInstanceProperties["Name"].Value.ToString()))
+                    foreach (VirtualMachine vm in ServerToVMEntry.Value.Where(v => v.Id.ToString().ToUpperInvariant() == instance.CimInstanceProperties["Name"].Value.ToString()))
                     {
                         vm.IsIgnored = true;
                     }
@@ -292,13 +339,35 @@ namespace HyperVTools
             return Processable_VirtualMachines;
         }
         /// <summary>
-        /// Using the provided server that it knows the VMS might fully lives on  attempts to update the hardware if it has fully entered the stopped state.
+        /// Using the provided server that it knows the VMS might fully lives on modifies the instance of the VM for the next run of pollVM and ChangeVMHardware
         /// </summary>
         /// <param name="server"></param>
         /// <param name="Process_VMs"></param>
-        public static void ProcessVMs(string server, List<VirtualMachine> Process_VMs)
+        public static void ProcessVMs(List<VirtualMachine> Process_VMs)
         {
+            try
+            {
+                foreach (HardwareQueHTTP entry in QuedRequests)
+                {
+                    VirtualMachine? vm = Process_VMs.Where(v => v.Id.ToString().ToUpperInvariant() == entry.Guid.ToUpperInvariant()).FirstOrDefault();
+                    if (vm != null && vm.Id != Guid.Empty)
+                    {
+                        switch (entry.Hardware)
+                        {
+                            case "CPU":
+                                vm.PendingCoreCount = Convert.ToInt32(entry.Quantity);
+                                break;
+                            case "MEMORY":
+                                throw new NotImplementedException("Memory is not implemented yet");
 
+                        }
+                    }
+                }
+            }
+            catch (SynchronizationLockException ex)
+            {
+                Debugger.Log(1, "", $"Process VMs encountered the the Que to be locked by the HTTP thread during this run, it will be fine {ex.Message}");
+            }
         }
         /// <summary>
         /// Probably Never going to be used but to not forget the way to invoke a CIM method against an object, if it is used bewarned its the same as unplugging the computer/turning off the VM not cleanly (Its really just KillVM)
@@ -306,9 +375,10 @@ namespace HyperVTools
         /// <param name="server"></param>
         /// <param name="VM"></param>
         /// <returns></returns>
-        public static int ChangeVMState(string server,VirtualMachine VM,VirtualMachine.VirtualMachineStates DesiredVMState) { 
+        public static int ChangeVMState(string server, VirtualMachine VM, VirtualMachine.VirtualMachineStates DesiredVMState)
+        {
             CimSession session = CimSession.Create(server);
-            IEnumerable<CimInstance> cimInstances = session.EnumerateInstances(CIM_VRTNS,CIM_VMCLASS);
+            IEnumerable<CimInstance> cimInstances = session.EnumerateInstances(CIM_VRTNS, CIM_VMCLASS);
             CimInstance VMInstance;
             try
             {
@@ -316,13 +386,13 @@ namespace HyperVTools
             }
             catch (Exception ex)
             {
-                Debugger.Log(1,"",$"Failed to retrive VM {VM.FriendlyName} from Server {server} exception is {ex.Message} did the VM Move to a different server?");
+                Debugger.Log(1, "", $"Failed to retrive VM {VM.FriendlyName} from Server {server} exception is {ex.Message} did the VM Move to a different server?");
                 return -1;
             }
             CimMethodParametersCollection method_params = new CimMethodParametersCollection();
-            CimMethodParameter param = CimMethodParameter.Create("RequestedState",(int)DesiredVMState,CimType.UInt16,CimFlags.None);
+            CimMethodParameter param = CimMethodParameter.Create("RequestedState", (int)DesiredVMState, CimType.UInt16, CimFlags.None);
             method_params.Add(param);
-            var result = session.InvokeMethod(VMInstance,"RequestStateChange",method_params);
+            var result = session.InvokeMethod(VMInstance, "RequestStateChange", method_params);
             return (int)result.ReturnValue.Value;
         }
         /// <summary>
@@ -333,11 +403,12 @@ namespace HyperVTools
         private static void ChangeVMhardware(string server, VirtualMachine vm)
         {
             CimSession cimSession = CimSession.Create(server);
-            CimInstance vsms = cimSession.EnumerateInstances(CIM_VRTNS,CIM_VSMSCLASS).Where(m => m.CimInstanceProperties["Name"].Value.ToString() == "vmms").First();
+            CimInstance vsms = cimSession.EnumerateInstances(CIM_VRTNS, CIM_VSMSCLASS).Where(m => m.CimInstanceProperties["Name"].Value.ToString() == "vmms").First();
             var thing = vsms.CimClass.CimClassMethods["ModifyResourceSettings"].Parameters;
             string CIM_Q = $"SELECT * FROM Msvm_ComputerSystem WHERE ElementName = '{vm.FriendlyName}'";
             CimInstance VMRef;
-            try { VMRef = cimSession.QueryInstances(CIM_VRTNS, "WQL", CIM_Q).First(); } catch (Exception ex) { Console.WriteLine($"Failed to retrive VM {ex.Message}"); return; };
+            try { VMRef = cimSession.QueryInstances(CIM_VRTNS, "WQL", CIM_Q).First(); } catch (Exception ex) { Console.WriteLine($"Failed to retrive VM {ex.Message}"); return; }
+            ;
             CimMethodParametersCollection cimMethodParameters = new CimMethodParametersCollection();
             CimMethodParameter? CPU_param = null;
             //I have to null these so i can't use an uninitalized value angering the compiler :(
@@ -351,9 +422,9 @@ namespace HyperVTools
             {
                 //"Msvm_SystemSettingData"
                 IEnumerable<CimInstance> _temp = cimSession.EnumerateInstances(CIM_VRTNS, CIM_VSMSSETTINGCLASS).Where(c => c.CimInstanceProperties["ElementName"].Value != null && c.CimInstanceProperties["ElementName"].Value.ToString().ToUpperInvariant() == "PROCESSOR");
-                ciminstance_CPU_ALLOC =  _temp.Where(c => c.CimInstanceProperties["InstanceID"].Value.ToString() == @$"Microsoft:{vm.Id.ToString().ToUpperInvariant()}\b637f346-6a0e-4dec-af52-bd70cb80a21d\0").First();
-                CimInstance vmsettingsInstance = cimSession.EnumerateAssociatedInstances(CIM_VRTNS,VMRef,null , "Msvm_VirtualSystemSettingData", null,null,null).First();
-                CimInstance processsettings = cimSession.EnumerateAssociatedInstances(CIM_VRTNS,vmsettingsInstance, null, "CIM_ResourceAllocationSettingData", null,null,null).Where(e => e.CimInstanceProperties["ElementName"].Value.ToString().ToUpperInvariant() == "PROCESSOR").First();
+                ciminstance_CPU_ALLOC = _temp.Where(c => c.CimInstanceProperties["InstanceID"].Value.ToString() == @$"Microsoft:{vm.Id.ToString().ToUpperInvariant()}\b637f346-6a0e-4dec-af52-bd70cb80a21d\0").First();
+                CimInstance vmsettingsInstance = cimSession.EnumerateAssociatedInstances(CIM_VRTNS, VMRef, null, "Msvm_VirtualSystemSettingData", null, null, null).First();
+                CimInstance processsettings = cimSession.EnumerateAssociatedInstances(CIM_VRTNS, vmsettingsInstance, null, "CIM_ResourceAllocationSettingData", null, null, null).Where(e => e.CimInstanceProperties["ElementName"].Value.ToString().ToUpperInvariant() == "PROCESSOR").First();
                 processsettings.CimInstanceProperties["VirtualQuantity"].Value = vm.PendingCoreCount;
                 Console.WriteLine(processsettings.ToString());
                 //cimMethodParameters.Add(CimMethodParameter.Create("ResourceSettings", new[] { processsettings.ToString() }, CimType.StringArray, CimFlags.None));
@@ -437,10 +508,10 @@ namespace HyperVTools
                 //    $")";
                 //CimInstance out_resourceSetting = new("CIM_ResourceAllocationSettingData");
                 //CimInstance out_concretejob = new("Cim_ConcreteJob");
-                string CIM_STRING = GenerateHyperVXML(vm,VirtualMachine.HardwareType.CPU);
+                string CIM_STRING = GenerateHyperVXML(vm, VirtualMachine.HardwareType.CPU);
                 cimMethodParameters.Add(CimMethodParameter.Create("ResourceSettings", new[] { CIM_STRING }, CimType.StringArray, CimFlags.In));
-            //    cimMethodParameters.Add(CimMethodParameter.Create("ResultingResourceSettings", out_resourceSetting, CimType.ReferenceArray, CimFlags.Out));
-            //    cimMethodParameters.Add(CimMethodParameter.Create("Job",out_concretejob,CimType.Reference,CimFlags.Out));
+                //    cimMethodParameters.Add(CimMethodParameter.Create("ResultingResourceSettings", out_resourceSetting, CimType.ReferenceArray, CimFlags.Out));
+                //    cimMethodParameters.Add(CimMethodParameter.Create("Job",out_concretejob,CimType.Reference,CimFlags.Out));
             }
             if (vm.PendingGBMemory > 0)
             {
@@ -448,11 +519,11 @@ namespace HyperVTools
             }
             if (ciminstance_CPU_ALLOC != null)
             {
-                
+
                 //ciminstance_CPU_ALLOC.CimInstanceProperties.Add(CimProperty.Create("ElementName","Processor",CimType.String,CimFlags.None));
                 //ciminstance_CPU_ALLOC.CimInstanceProperties.Add(CimProperty.Create("VirtualQuantity", vm.PendingCoreCount, CimType.UInt64, CimFlags.None));
                 //ciminstance_CPU_ALLOC.CimInstanceProperties["VirtualQuantity"].Value = vm.PendingCoreCount;
-                
+
                 //CimSerializer serializer = CimSerializer.Create();
                 //cimMethodParameters.Add(CimMethodParameter.Create("ResourceSettings", new[] {System.Text.Encoding.UTF8.GetString(serializer.Serialize(ciminstance_CPU_ALLOC,InstanceSerializationOptions.None)) },CimType.StringArray,CimFlags.None));
                 //cimMethodParameters.Add(CimMethodParameter.Create("ResourceSettings", new[] { System.Text.Json.JsonSerializer.Serialize(ciminstance_CPU_ALLOC.CimInstanceProperties) }, CimType.StringArray, CimFlags.None));
@@ -471,15 +542,16 @@ namespace HyperVTools
             }
             if (cimMethodParameters.Count > 0)
             {
-                var result = cimSession.InvokeMethod(vsms,"ModifyResourceSettings",cimMethodParameters);
+                var result = cimSession.InvokeMethod(vsms, "ModifyResourceSettings", cimMethodParameters);
                 if ((uint)result.ReturnValue.Value == 0)
                 {
-                    if (vm.PendingCoreCount != 0) {
+                    if (vm.PendingCoreCount != 0)
+                    {
                         vm.UpdateVirtualMachine("CPU", vm.PendingCoreCount);
                     }
                     if (vm.PendingGBMemory != 0)
                     {
-                        vm.UpdateVirtualMachine("MEMORY",vm.PendingGBMemory);
+                        vm.UpdateVirtualMachine("MEMORY", vm.PendingGBMemory);
                     }
                     vm.PendingCoreCount = 0;
                     vm.PendingGBMemory = 0;
@@ -491,13 +563,14 @@ namespace HyperVTools
             }
             cimSession.Close();
         }
-        private static string SerializeCimInstance(CimInstance instance,VirtualMachine.HardwareType SettingType)
+        private static string SerializeCimInstance(CimInstance instance, VirtualMachine.HardwareType SettingType)
         {
             StringBuilder stringBuilder = new StringBuilder();
             if (SettingType == VirtualMachine.HardwareType.CPU)
             {
                 stringBuilder.AppendLine("<INSTANCE CLASSNAME=\"Msvm_ProcessorSettingData\">");
-            }else if ( SettingType == VirtualMachine.HardwareType.MEMORY)
+            }
+            else if (SettingType == VirtualMachine.HardwareType.MEMORY)
             {
                 stringBuilder.AppendLine("<INSTANCE CLASSNAME=\"Msvm_MemorySettingData\"");
             }
@@ -505,7 +578,7 @@ namespace HyperVTools
             {
                 if (property.Value != null)
                 {
-                    stringBuilder.AppendLine($"  <PROPERTY NAME=\"{ property.Name}\" TYPE=\"string\"");
+                    stringBuilder.AppendLine($"  <PROPERTY NAME=\"{property.Name}\" TYPE=\"string\"");
                     stringBuilder.AppendLine($"    <VALUE>{property.Value}</VALUE>");
                     stringBuilder.AppendLine("  </PROPERTY");
                 }
@@ -513,11 +586,11 @@ namespace HyperVTools
             stringBuilder.AppendLine("</INSTANCE>");
             return stringBuilder.ToString();
         }
-        private static string GenerateHyperVXML(VirtualMachine vm,VirtualMachine.HardwareType settingtype)
+        private static string GenerateHyperVXML(VirtualMachine vm, VirtualMachine.HardwareType settingtype)
         {
             if (settingtype == VirtualMachine.HardwareType.CPU)
             {
-                return                                                "<INSTANCE CLASSNAME=\"Msvm_ProcessorSettingData\">" +
+                return "<INSTANCE CLASSNAME=\"Msvm_ProcessorSettingData\">" +
                                                                       "<PROPERTY NAME=\"Caption\" TYPE=\"string\"><VALUE>Processor</VALUE></PROPERTY>" +
                                                                       "<PROPERTY NAME=\"Description\" TYPE=\"string\"><VALUE>Settings for Microsoft Virtual Processor.</VALUE></PROPERTY>" +
                                                                       "<PROPERTY NAME=\"ElementName\" TYPE=\"string\"><VALUE>Processor</VALUE></PROPERTY>" +
@@ -574,7 +647,7 @@ namespace HyperVTools
             }
             if (settingtype == VirtualMachine.HardwareType.MEMORY)
             {
-                throw new NotImplementedException( "Haven't formated the XML for the Memory : (");
+                throw new NotImplementedException("Haven't formated the XML for the Memory : (");
             }
             return "No implement setting type given";
         }

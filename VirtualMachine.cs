@@ -6,7 +6,7 @@
     //Hard to do)
     public class VirtualMachine
     {
-        public Guid Id { get; }
+        public Guid Id { get; } = Guid.Empty;
         public string FriendlyName { get; }
         public int CoreCount { get; private set; }
         public int PendingCoreCount { get; set; } = 0;

@@ -1,9 +1,11 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.13.35931.197 d17.13
+VisualStudioVersion = 17.13.35931.197
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hyper-VTools", "Hyper-VTools.csproj", "{48A42393-6495-49CC-B49D-683F5C88D68E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HyperVToolsPowershell", "HyperVToolsPowershell\HyperVToolsPowershell.csproj", "{4D61B279-5B87-A924-8C0D-5DCC975A45AB}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -15,6 +17,10 @@ Global
 		{48A42393-6495-49CC-B49D-683F5C88D68E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{48A42393-6495-49CC-B49D-683F5C88D68E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{48A42393-6495-49CC-B49D-683F5C88D68E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4D61B279-5B87-A924-8C0D-5DCC975A45AB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4D61B279-5B87-A924-8C0D-5DCC975A45AB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4D61B279-5B87-A924-8C0D-5DCC975A45AB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4D61B279-5B87-A924-8C0D-5DCC975A45AB}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
