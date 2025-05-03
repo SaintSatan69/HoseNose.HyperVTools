@@ -138,10 +138,15 @@ namespace HyperVTools
                         }
                         else
                         {
-                            Stream request_stream = context.Request.InputStream;
-                            byte[] request_streambytes = new byte[request_stream.Length];
-                            request_stream.ReadExactly(request_streambytes, 0, (int)request_stream.Length);
-                            HardwareQueHTTP? que_resource = System.Text.Json.JsonSerializer.Deserialize<HardwareQueHTTP>(System.Text.Encoding.UTF8.GetString(request_streambytes));
+                            StreamReader request_stream = new StreamReader(context.Request.InputStream);
+                            string value = request_stream.ReadToEnd();
+                            //byte[] request_streambytes = new byte[request_stream.Length];
+                            //request_stream.Read(request_streambytes, 0, (int)request_stream.Length);
+                            //HardwareQueHTTP? que_resource = System.Text.Json.JsonSerializer.Deserialize<HardwareQueHTTP>(System.Text.Encoding.UTF8.GetString(request_streambytes));
+                            HardwareQueHTTP? que_resource = System.Text.Json.JsonSerializer.Deserialize<HardwareQueHTTP>(value);
+                            Debugger.Log(1,"",$"client sent {(que_resource != null)}::{value}{Environment.NewLine}");
+                            context.Response.StatusCode = (int)HttpStatusCode.OK;
+                            context.Response.Close();
                             if (que_resource != null)
                             {
                                 lock (QuedRequests)
@@ -153,11 +158,12 @@ namespace HyperVTools
                     }
                     catch (Exception ex)
                     {
-                        Debugger.Log(1, "", $"Request has failed for reason{ex.Message}");
+                        Debugger.Log(1, "", $"Request has failed for reason{ex.Message}{Environment.NewLine}");
                     }
 
                 }
             });
+            HTTP.Start();
             NodeServers = GetServers();
             //With the Current Nodes, we now need to actually get each servers VMS and the current state and periodically poll the node for updates
             foreach (Server server in NodeServers)
@@ -182,12 +188,14 @@ namespace HyperVTools
             }
             Console.ForegroundColor = ConsoleColor.White;
             //Now the fun begins
-            BigInteger _internal_counter = 0;
+            ulong _internal_counter = 0;
+            ulong _epoch = 0;
             List<VirtualMachine> Processable_VMs = new();
             while (true)
             {
                 foreach (KeyValuePair<Server, List<VirtualMachine>> entry in ServerToVM)
                 {
+                    Processable_VMs.Clear();
                     Processable_VMs = PollVirtualMachineStatus(entry);
                     Console.WriteLine();
                     foreach (VirtualMachine _vm in Processable_VMs)
@@ -196,9 +204,20 @@ namespace HyperVTools
                         ChangeVMhardware(entry.Key.ServerName, _vm);
                     }
                     Console.WriteLine();
+                    ProcessVMs(entry.Value);
                 }
-
-                _internal_counter++;
+                if (_internal_counter == ulong.MaxValue - 10)
+                {
+                    _internal_counter = 0;
+                    _epoch++;
+                }
+                else
+                {
+                    _internal_counter++;
+                }
+                if (_internal_counter % 30 == 0) {
+                    GC.Collect();
+                }
                 Thread.Sleep(POLL_TIME);
             }
         }
@@ -253,6 +272,7 @@ namespace HyperVTools
                             }
                         }
                         servers.Add(new Server(Cur_node, Num_roles));
+                        NodeIdentityCim.Close();
                     }
                     catch (Exception e)
                     {
@@ -345,23 +365,43 @@ namespace HyperVTools
         /// <param name="Process_VMs"></param>
         public static void ProcessVMs(List<VirtualMachine> Process_VMs)
         {
+            bool HasProcessedone = false;
+            HardwareQueHTTP ProcessedThingToPopOffTheList = null;
             try
             {
                 foreach (HardwareQueHTTP entry in QuedRequests)
                 {
-                    VirtualMachine? vm = Process_VMs.Where(v => v.Id.ToString().ToUpperInvariant() == entry.Guid.ToUpperInvariant()).FirstOrDefault();
-                    if (vm != null && vm.Id != Guid.Empty)
+                    if (HasProcessedone)
                     {
-                        switch (entry.Hardware)
+                        break;
+                    }
+                    try
+                    {
+                        VirtualMachine? vm = Process_VMs.Where(v => v.Id.ToString().ToUpperInvariant() == entry.Guid.ToUpperInvariant()).First();
+                        if (vm != null && vm.Id != Guid.Empty)
                         {
-                            case "CPU":
-                                vm.PendingCoreCount = Convert.ToInt32(entry.Quantity);
-                                break;
-                            case "MEMORY":
-                                throw new NotImplementedException("Memory is not implemented yet");
+                            switch (entry.Hardware)
+                            {
+                                case "CPU":
+                                    vm.PendingCoreCount = Convert.ToInt32(entry.Quantity);
+                                    HasProcessedone = true;
+                                    ProcessedThingToPopOffTheList = entry;
+                                    break;
+                                case "MEMORY":
+                                    throw new NotImplementedException("Memory is not implemented yet");
 
+                            }
                         }
                     }
+                    catch (Exception ex)
+                    {
+                        Debugger.Log(1,"",$"Internal Try of Process VMS caught ({ex.Message}){Environment.NewLine}");
+                        continue;
+                    }
+                }
+                if (HasProcessedone && ProcessedThingToPopOffTheList != null)
+                {
+                    QuedRequests.Remove(ProcessedThingToPopOffTheList);
                 }
             }
             catch (SynchronizationLockException ex)
