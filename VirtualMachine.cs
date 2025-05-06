@@ -13,6 +13,7 @@
         public int GBMemory { get; private set; }
         public int PendingGBMemory { get; set; } = 0;
         public bool IsIgnored { get; set;}
+        public bool IsShuttingDown { get; set; } = false;
         public VirtualMachineStates VirtualMachineState { get; set; }
         public VirtualMachine(Guid VMID, string NiceName,int coreCount,int gbmem) 
         { 

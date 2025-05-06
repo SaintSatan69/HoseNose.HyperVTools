@@ -14,6 +14,7 @@ namespace HyperVTools
         private static string ClusterName;
         private static List<Server> NodeServers;
         private static Dictionary<Server, List<VirtualMachine>> ServerToVM = new();
+        private static List<VirtualMachine> VmsToldToShutdownstatus = new();
         private static List<HardwareQueHTTP> QuedRequests = new();
         private static Boolean IsCluster = false;
 #pragma warning restore CS8618
@@ -88,8 +89,10 @@ namespace HyperVTools
 
 
         private const string FORMAT_SPACE = "                                ";
-        private static int POLL_TIME = 100;
+        private static int POLL_TIME = 1;
         private static bool IsVerbose = true;
+        private static bool IsDebug = true;
+        private static int ShutdownAggressiveFactor = 10000;
         public static void Main(string[] args)
         {
             AppDomain.CurrentDomain.UnhandledException += ExcecptionHandler;
@@ -109,6 +112,15 @@ namespace HyperVTools
                 if (args[i] == "-verbose")
                 {
                     IsVerbose = true;
+                }
+                if (args[i] == "-aggressiveness")
+                {
+                    try { string _ = args[i + 1]; } catch { Console.WriteLine("Invalid Or Missing Aggressiveness"); Environment.Exit(1); }
+                    ShutdownAggressiveFactor = Convert.ToInt32(args[i + 1]);
+                }
+                if (args[i] == "-superdebug")
+                {
+                    IsDebug = true;
                 }
             }
 
@@ -182,41 +194,54 @@ namespace HyperVTools
                 //Console.WriteLine($"{server.ServerName}");
                 foreach (VirtualMachine vm in ServerToVM[server])
                 {
-                    Console.WriteLine($"{server.ServerName}{FORMAT_SPACE.Substring(server.ServerName.Length - 6)}{vm.FriendlyName}{FORMAT_SPACE.Substring(0, FORMAT_SPACE.Length - vm.FriendlyName.Length)}{"      "}{vm.Id}");
+                    if (server.ServerName.Length > 6) 
+                    {
+                        Console.WriteLine($"{server.ServerName}{FORMAT_SPACE.Substring(server.ServerName.Length - 6)}{vm.FriendlyName}{FORMAT_SPACE.Substring(0, FORMAT_SPACE.Length - vm.FriendlyName.Length)}{"      "}{vm.Id}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"{server.ServerName}{FORMAT_SPACE.Substring(0,FORMAT_SPACE.Length - server.ServerName.Length)}{vm.FriendlyName}{FORMAT_SPACE.Substring(0, FORMAT_SPACE.Length - vm.FriendlyName.Length)}{"      "}{vm.Id}");
+                    }
                 }
                 Console.WriteLine();
             }
             Console.ForegroundColor = ConsoleColor.White;
             //Now the fun begins
-            ulong _internal_counter = 0;
-            ulong _epoch = 0;
+            UInt16 _internal_counter = 0;
             List<VirtualMachine> Processable_VMs = new();
+            //The heart of the Scheduler, Polls for VM states and will determine which ones can be processed and do so. after 30 loops informs the Garbage Collector its time to collect a head of its normal schedule
             while (true)
             {
                 foreach (KeyValuePair<Server, List<VirtualMachine>> entry in ServerToVM)
                 {
-                    Processable_VMs.Clear();
                     Processable_VMs = PollVirtualMachineStatus(entry);
                     Console.WriteLine();
-                    foreach (VirtualMachine _vm in Processable_VMs)
+                    //Avoiding Allocating memory in the heap
+                    for (int i = 0; i < Processable_VMs.Count; i++)
                     {
-                        Console.WriteLine($"VM: {_vm.FriendlyName} is in a state for processing");
-                        ChangeVMhardware(entry.Key.ServerName, _vm);
+                        Console.WriteLine($"VM: {Processable_VMs[i].FriendlyName} is in a state for processing");
+                        ChangeVMhardware(entry.Key.ServerName, Processable_VMs[i]);
                     }
+                    //foreach (VirtualMachine _vm in Processable_VMs)
+                    //{
+                    //    Console.WriteLine($"VM: {_vm.FriendlyName} is in a state for processing");
+                    //    ChangeVMhardware(entry.Key.ServerName, _vm);
+                    //}
                     Console.WriteLine();
                     ProcessVMs(entry.Value);
+                    for(int j = 0; j < VmsToldToShutdownstatus.Count; j++)
+                    {
+                        ChangeVMState(entry.Key.ServerName, VmsToldToShutdownstatus[j],VirtualMachine.VirtualMachineStates.SHUTDOWN);
+                    }
                 }
-                if (_internal_counter == ulong.MaxValue - 10)
+                if (_internal_counter % 30 == 0)
                 {
-                    _internal_counter = 0;
-                    _epoch++;
+                    GC.Collect();
+                    _internal_counter = 1;
                 }
                 else
                 {
                     _internal_counter++;
-                }
-                if (_internal_counter % 30 == 0) {
-                    GC.Collect();
                 }
                 Thread.Sleep(POLL_TIME);
             }
@@ -352,7 +377,7 @@ namespace HyperVTools
                     }
                 }
             }
-            var filtered_cim_disabled_VMs = cimdata.Where(cd => (cd.CimInstanceProperties["EnabledState"].Value.ToString() == "3" || cd.CimInstanceProperties["EnabledState"].Value.ToString() == "4"));
+            var filtered_cim_disabled_VMs = cimdata.Where(cd => (cd.CimInstanceProperties["EnabledState"].Value.ToString() == "3" || cd.CimInstanceProperties["EnabledState"].Value.ToString() == "4" || cd.CimInstanceProperties["EnabledState"].Value.ToString() == "10" || cd.CimInstanceProperties["RequestedState"].Value.ToString() == "10"));
             //What in the world was i thinking, i just need a list of all VMS that have gone into the shutdown state or powered off state, while also not being a VM thats in an ignored state
             Processable_VirtualMachines = ServerToVMEntry.Value.Where(vm => ((!vm.IsIgnored) && (filtered_cim_disabled_VMs.Where(cid => cid.CimInstanceProperties["Name"].Value.ToString() == vm.Id.ToString().ToUpperInvariant()).Any()))).ToList();
             ServerCim.Close();
@@ -415,7 +440,7 @@ namespace HyperVTools
         /// <param name="server"></param>
         /// <param name="VM"></param>
         /// <returns></returns>
-        public static int ChangeVMState(string server, VirtualMachine VM, VirtualMachine.VirtualMachineStates DesiredVMState)
+        public static uint ChangeVMState(string server, VirtualMachine VM, VirtualMachine.VirtualMachineStates DesiredVMState)
         {
             CimSession session = CimSession.Create(server);
             IEnumerable<CimInstance> cimInstances = session.EnumerateInstances(CIM_VRTNS, CIM_VMCLASS);
@@ -427,13 +452,13 @@ namespace HyperVTools
             catch (Exception ex)
             {
                 Debugger.Log(1, "", $"Failed to retrive VM {VM.FriendlyName} from Server {server} exception is {ex.Message} did the VM Move to a different server?");
-                return -1;
+                return uint.MaxValue;
             }
             CimMethodParametersCollection method_params = new CimMethodParametersCollection();
             CimMethodParameter param = CimMethodParameter.Create("RequestedState", (int)DesiredVMState, CimType.UInt16, CimFlags.None);
             method_params.Add(param);
             var result = session.InvokeMethod(VMInstance, "RequestStateChange", method_params);
-            return (int)result.ReturnValue.Value;
+            return (uint)result.ReturnValue.Value;
         }
         /// <summary>
         /// This is an unholy abominiation to the eyes of the reader, pray tell why your here i hope you leave quickly before ending like the one crazy guy meme whos pointing at a whole heck of a lot of paper
@@ -448,7 +473,39 @@ namespace HyperVTools
             string CIM_Q = $"SELECT * FROM Msvm_ComputerSystem WHERE ElementName = '{vm.FriendlyName}'";
             CimInstance VMRef;
             try { VMRef = cimSession.QueryInstances(CIM_VRTNS, "WQL", CIM_Q).First(); } catch (Exception ex) { Console.WriteLine($"Failed to retrive VM {ex.Message}"); return; }
-            ;
+            bool IsRenenabledAtEnd = false;
+            //This mess is to hopefully
+            if ((ulong)(VMRef.CimInstanceProperties["OnTimeInMilliseconds"].Value) <= (ulong)(10000 * (ShutdownAggressiveFactor / 10)) && VMRef.CimInstanceProperties["OnTimeInMilliseconds"].Value.ToString() != "0" && !vm.IsShuttingDown && (vm.PendingCoreCount !=0 || vm.PendingGBMemory != 0))
+            {
+                VmsToldToShutdownstatus.Add(vm);
+                Console.WriteLine($"Intercepting the boot from VM:{vm.FriendlyName}");
+                ChangeVMState(server,vm,VirtualMachine.VirtualMachineStates.SHUTDOWN);
+                vm.IsShuttingDown = true;
+                return;
+            }
+            else if (IsDebug)
+            {
+                Console.WriteLine($"VM-DEBUG: {vm.FriendlyName} did not pass the Interception state");
+            }
+            //if (VMRef.CimInstanceProperties["EnabledState"].Value.ToString() == "3" && vm.IsShuttingDown)
+            //{
+            //    if (IsDebug)
+            //    {
+            //        Console.WriteLine($"DEBUG: SENDING MORE SHUTDOWNS TO {vm.FriendlyName}");
+            //    }
+            //    ChangeVMState(server, vm, VirtualMachine.VirtualMachineStates.SHUTDOWN);
+            //    return;
+            //}
+            if ((VMRef.CimInstanceProperties["EnabledState"].Value.ToString() == "4" || VMRef.CimInstanceProperties["EnabledState"].Value.ToString() == "3") && vm.IsShuttingDown)
+            {
+                if (IsDebug)
+                {
+                    Console.WriteLine($"DEBUG: SENDING SHUTDOWNS SUCCESSFUL ON {vm.FriendlyName}");
+                }
+                vm.IsShuttingDown = false;
+                VmsToldToShutdownstatus.Remove(vm);
+                IsRenenabledAtEnd = true;
+            }
             CimMethodParametersCollection cimMethodParameters = new CimMethodParametersCollection();
             CimMethodParameter? CPU_param = null;
             //I have to null these so i can't use an uninitalized value angering the compiler :(
@@ -461,12 +518,12 @@ namespace HyperVTools
             if (vm.PendingCoreCount > 0)
             {
                 //"Msvm_SystemSettingData"
-                IEnumerable<CimInstance> _temp = cimSession.EnumerateInstances(CIM_VRTNS, CIM_VSMSSETTINGCLASS).Where(c => c.CimInstanceProperties["ElementName"].Value != null && c.CimInstanceProperties["ElementName"].Value.ToString().ToUpperInvariant() == "PROCESSOR");
-                ciminstance_CPU_ALLOC = _temp.Where(c => c.CimInstanceProperties["InstanceID"].Value.ToString() == @$"Microsoft:{vm.Id.ToString().ToUpperInvariant()}\b637f346-6a0e-4dec-af52-bd70cb80a21d\0").First();
-                CimInstance vmsettingsInstance = cimSession.EnumerateAssociatedInstances(CIM_VRTNS, VMRef, null, "Msvm_VirtualSystemSettingData", null, null, null).First();
-                CimInstance processsettings = cimSession.EnumerateAssociatedInstances(CIM_VRTNS, vmsettingsInstance, null, "CIM_ResourceAllocationSettingData", null, null, null).Where(e => e.CimInstanceProperties["ElementName"].Value.ToString().ToUpperInvariant() == "PROCESSOR").First();
-                processsettings.CimInstanceProperties["VirtualQuantity"].Value = vm.PendingCoreCount;
-                Console.WriteLine(processsettings.ToString());
+                //IEnumerable<CimInstance> _temp = cimSession.EnumerateInstances(CIM_VRTNS, CIM_VSMSSETTINGCLASS).Where(c => c.CimInstanceProperties["ElementName"].Value != null && c.CimInstanceProperties["ElementName"].Value.ToString().ToUpperInvariant() == "PROCESSOR");
+                //ciminstance_CPU_ALLOC = _temp.Where(c => c.CimInstanceProperties["InstanceID"].Value.ToString() == @$"Microsoft:{vm.Id.ToString().ToUpperInvariant()}\b637f346-6a0e-4dec-af52-bd70cb80a21d\0").First();
+                //CimInstance vmsettingsInstance = cimSession.EnumerateAssociatedInstances(CIM_VRTNS, VMRef, null, "Msvm_VirtualSystemSettingData", null, null, null).First();
+                //CimInstance processsettings = cimSession.EnumerateAssociatedInstances(CIM_VRTNS, vmsettingsInstance, null, "CIM_ResourceAllocationSettingData", null, null, null).Where(e => e.CimInstanceProperties["ElementName"].Value.ToString().ToUpperInvariant() == "PROCESSOR").First();
+                //processsettings.CimInstanceProperties["VirtualQuantity"].Value = vm.PendingCoreCount;
+                //Console.WriteLine(processsettings.ToString());
                 //cimMethodParameters.Add(CimMethodParameter.Create("ResourceSettings", new[] { processsettings.ToString() }, CimType.StringArray, CimFlags.None));
                 //string CIM_STRING = $"Msvm_ProcessorSettingData:" +
                 //    $"Caption = Processor," +
@@ -602,6 +659,10 @@ namespace HyperVTools
                 }
             }
             cimSession.Close();
+            if (IsRenenabledAtEnd)
+            {
+                ChangeVMState(server,vm,VirtualMachine.VirtualMachineStates.OK);
+            }
         }
         private static string SerializeCimInstance(CimInstance instance, VirtualMachine.HardwareType SettingType)
         {
