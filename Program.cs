@@ -93,6 +93,20 @@ namespace HyperVTools
         private static bool IsVerbose = true;
         private static bool IsDebug = true;
         private static int ShutdownAggressiveFactor = 10000;
+
+        private static bool IsPSGadgetsActive = true;
+        private static string PSGadgetsIngestor = "";
+        private static int PSGadgetsSendInterval = 100;
+        private static string InstanceGuid = "";
+        //For PSGadgets incase you wanted a indicator that its in the process of changing a VM;
+        private static bool IsProcessing = false;
+        //Stuff that can change without hopefully causing a reference exception or other bugs
+        private static int Count_processable = 0;
+        private static int Count_Retry = 0;
+        private static UInt64 Qued_modified = 0;
+
+        //Won't be null but needs to be nullable for null coalescing in the PsGadgets time incase someone trys to make an instance of it outside the scheduler in which they may not have the property avaiable
+        public static DateTime? StartTime = DateTime.Now;
         public static void Main(string[] args)
         {
             AppDomain.CurrentDomain.UnhandledException += ExcecptionHandler;
@@ -122,60 +136,136 @@ namespace HyperVTools
                 {
                     IsDebug = true;
                 }
-            }
+                if (args[i] == "-psgadgets")
+                {
+                    IsPSGadgetsActive = true;
 
-            Thread HTTP = new(() =>
-            {
-                HttpListener Api = new HttpListener();
-                try
-                {
-                    //We use local host as the client will initiate a remote powershell session over WSMAN/WINRM and invoke a webrequest to localhost and hopefully to this program, WSMAN will handle the auth from the calling place.
-                    Api.Prefixes.Add("http://localhost:6969/");
-                    Api.Start();
                 }
-                catch (Exception ex)
+                if (args[i] == "-psgadgetshost")
                 {
-                    throw new Exception($"Unable To Start the HTTP Interface needed for people to schedual hardware changes reason is {ex.Message}");
+                    PSGadgetsIngestor = args[i + 1];
+
                 }
-                while (true)
+                if (args[i] == "-psgadgetsinterval")
                 {
                     try
                     {
-                        HttpListenerContext context = Api.GetContext();
-                        if (context.Request.HttpMethod != "POST")
+                        if (!args[i + 1].Contains('-'))
                         {
-                            //since is meant just to be able to add hardware chances to the que
-                            context.Response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
-                            context.Response.Close();
+                            PSGadgetsSendInterval = Convert.ToInt32(args[i + 1]);
                         }
-                        else
-                        {
-                            StreamReader request_stream = new StreamReader(context.Request.InputStream);
-                            string value = request_stream.ReadToEnd();
-                            //byte[] request_streambytes = new byte[request_stream.Length];
-                            //request_stream.Read(request_streambytes, 0, (int)request_stream.Length);
-                            //HardwareQueHTTP? que_resource = System.Text.Json.JsonSerializer.Deserialize<HardwareQueHTTP>(System.Text.Encoding.UTF8.GetString(request_streambytes));
-                            HardwareQueHTTP? que_resource = System.Text.Json.JsonSerializer.Deserialize<HardwareQueHTTP>(value);
-                            Debugger.Log(1,"",$"client sent {(que_resource != null)}::{value}{Environment.NewLine}");
-                            context.Response.StatusCode = (int)HttpStatusCode.OK;
-                            context.Response.Close();
-                            if (que_resource != null)
-                            {
-                                lock (QuedRequests)
-                                {
-                                    QuedRequests.Add(que_resource);
-                                }
-                            }
-                        }
+                    }
+                    catch
+                    {
+                        Console.WriteLine("Failed set the interval for sending data to the host defaulting to 100ms");
+                    }
+                }
+            }
+            if (File.Exists(@".\InstanceGuid.txt"))
+            {
+                InstanceGuid = File.ReadAllText(@".\InstanceGuid.txt");
+            }
+            else
+            {
+                InstanceGuid = Guid.NewGuid().ToString();
+                File.WriteAllText(@".\InstanceGuid.txt",InstanceGuid);
+            }
+                Thread HTTP = new(() =>
+                {
+                    HttpListener Api = new HttpListener();
+                    try
+                    {
+                        //We use local host as the client will initiate a remote powershell session over WSMAN/WINRM and invoke a webrequest to localhost and hopefully to this program, WSMAN will handle the auth from the calling place.
+                        Api.Prefixes.Add("http://localhost:6969/");
+                        Api.Start();
                     }
                     catch (Exception ex)
                     {
-                        Debugger.Log(1, "", $"Request has failed for reason{ex.Message}{Environment.NewLine}");
+                        throw new Exception($"Unable To Start the HTTP Interface needed for people to schedual hardware changes reason is {ex.Message}");
                     }
+                    while (true)
+                    {
+                        try
+                        {
+                            HttpListenerContext context = Api.GetContext();
+                            if (context.Request.RawUrl == "/api/v1/changehardwarque") {
 
-                }
-            });
+
+                                if (context.Request.HttpMethod != "POST")
+                                {
+                                    //since is meant just to be able to add hardware chances to the que
+                                    context.Response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                                    context.Response.Close();
+                                }
+                                else
+                                {
+                                    StreamReader request_stream = new StreamReader(context.Request.InputStream);
+                                    string value = request_stream.ReadToEnd();
+                                    //byte[] request_streambytes = new byte[request_stream.Length];
+                                    //request_stream.Read(request_streambytes, 0, (int)request_stream.Length);
+                                    //HardwareQueHTTP? que_resource = System.Text.Json.JsonSerializer.Deserialize<HardwareQueHTTP>(System.Text.Encoding.UTF8.GetString(request_streambytes));
+                                    HardwareQueHTTP? que_resource = System.Text.Json.JsonSerializer.Deserialize<HardwareQueHTTP>(value);
+                                    Debugger.Log(1, "", $"client sent {(que_resource != null)}::{value}{Environment.NewLine}");
+                                    context.Response.StatusCode = (int)HttpStatusCode.OK;
+                                    context.Response.Close();
+                                    if (que_resource != null)
+                                    {
+                                        lock (QuedRequests)
+                                        {
+                                            QuedRequests.Add(que_resource);
+                                        }
+                                    }
+                                }
+                            }
+                            else if (context.Request.RawUrl == "/api/v1/psgadgets" && IsPSGadgetsActive && String.IsNullOrEmpty(PSGadgetsIngestor))
+                            {
+                                //Windows was Access deny on the second http listener for what ever reason so its been incorperated into the main config listener
+                                context.Response.OutputStream.Write(System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(new PSGadgetsHttp(InstanceGuid, QuedRequests.Count, ServerToVM.Count, Count_processable, IsProcessing, Count_Retry))));
+                                context.Response.StatusCode = 200;
+                                context.Response.Close();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Debugger.Log(1, "", $"Request has failed for reason{ex.Message}{Environment.NewLine}");
+                        }
+
+                    }
+                });
             HTTP.Start();
+            if (IsPSGadgetsActive && !String.IsNullOrEmpty(PSGadgetsIngestor))
+            {
+                Thread PSGadgets = new(() =>
+                {
+                    ////If its the server that the PSGadgets will go retrive it from or if its pushing the data to the PSgadgets Host, If the PSGadgets Host is Empty then we know its acting as the server expecting requests
+                    //if (String.IsNullOrEmpty(PSGadgetsIngestor))
+                    //{
+                    //    HttpListener PSGagetsHttp = new HttpListener();
+                    //    PSGagetsHttp.Prefixes.Add($"http://localhost:{PSGadgetsSendInterval}/api/psgadgets/");
+                    //    PSGagetsHttp.Start();
+                    //    while (true)
+                    //    {
+                    //        HttpListenerContext context = PSGagetsHttp.GetContext();
+                    //        //May make specific things Requestable Maybe not idk
+                    //        //string Request = new StreamReader(context.Request.InputStream).ReadToEnd();
+                    //        //PSGadgetsHttp? RequestObject = System.Text.Json.JsonSerializer.Deserialize<PSGadgetsHttp>(Request);
+                    //        context.Response.OutputStream.Write(System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(new PSGadgetsHttp(InstanceGuid,QuedRequests.Count,ServerToVM.Count,Count_processable,IsProcessing,Count_Retry))));
+                    //        context.Response.StatusCode = 200;
+                    //    }
+                    //}
+                    while (true)
+                    {
+                        HttpClient httpClient = new HttpClient();
+                        HttpRequestMessage httpRequestMessage = new (HttpMethod.Post,$"http://{PSGadgetsIngestor}/api/v1/psgadgets");
+                        PSGadgetsHttp payload = new(InstanceGuid, QuedRequests.Count, ServerToVM.Count, Count_processable, IsProcessing, Count_Retry);
+                        httpRequestMessage.Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(payload));
+                        httpClient.Send(httpRequestMessage);
+                        httpClient.Dispose();
+                        Thread.Sleep(PSGadgetsSendInterval);
+                    }
+                });
+                PSGadgets.Start();
+            }
             NodeServers = GetServers();
             //With the Current Nodes, we now need to actually get each servers VMS and the current state and periodically poll the node for updates
             foreach (Server server in NodeServers)
@@ -215,6 +305,7 @@ namespace HyperVTools
                 foreach (KeyValuePair<Server, List<VirtualMachine>> entry in ServerToVM)
                 {
                     Processable_VMs = PollVirtualMachineStatus(entry);
+                    Count_processable = Processable_VMs.Count;
                     Console.WriteLine();
                     //Avoiding Allocating memory in the heap
                     for (int i = 0; i < Processable_VMs.Count; i++)
@@ -229,6 +320,7 @@ namespace HyperVTools
                     //}
                     Console.WriteLine();
                     ProcessVMs(entry.Value);
+                    Count_Retry = VmsToldToShutdownstatus.Count;
                     for(int j = 0; j < VmsToldToShutdownstatus.Count; j++)
                     {
                         ChangeVMState(entry.Key.ServerName, VmsToldToShutdownstatus[j],VirtualMachine.VirtualMachineStates.SHUTDOWN);
@@ -639,6 +731,7 @@ namespace HyperVTools
             }
             if (cimMethodParameters.Count > 0)
             {
+                IsProcessing = true;
                 var result = cimSession.InvokeMethod(vsms, "ModifyResourceSettings", cimMethodParameters);
                 if ((uint)result.ReturnValue.Value == 0)
                 {
@@ -657,6 +750,7 @@ namespace HyperVTools
                 {
                     Console.WriteLine(result.ReturnValue.Value);
                 }
+                IsProcessing = false;
             }
             cimSession.Close();
             if (IsRenenabledAtEnd)
@@ -748,7 +842,29 @@ namespace HyperVTools
             }
             if (settingtype == VirtualMachine.HardwareType.MEMORY)
             {
-                throw new NotImplementedException("Haven't formated the XML for the Memory : (");
+                return "<INSTANCE CLASSNAME=\"Msvm_MemorySettingData\">" +
+                       "<PROPERTY NAME=\"Caption\" TYPE=\"string\"><VALUE>Memory</VALUE></PROPERTY>" +
+                       "<PROPERTY NAME=\"Description\" TYPE=\"string\"><VALUE>Settings for Microsoft Virtual Machine Memory</VALUE></PROPERTY>" +
+                       "<PROPERTY NAME=\"ElementName\" TYPE=\"string\"><VALUE>Memory</VALUE></PROPERTY>" +
+                       $"<PROPERTY NAME=\"InstanceID\" TYPE=\"string\"><VALUE>Microsoft:{vm.Id.ToString().ToUpperInvariant()}\\4764334d-e001-4176-82ee-5594ec9b530e</VALUE></PROPERTY>" +
+                       "<PROPERTY NAME=\"Address\" TYPE=\"string\"></PROPERTY>" +
+                       "<PROPERTY NAME=\"AddressOnParent\" TYPE=\"string\"></PROPERTY>" +
+                       "<PROPERTY NAME=\"AllocationUnits\" TYPE=\"string\"><VALUE>byte * 2^20</VALUE></PROPERTY>" +
+                       "<PROPERTY NAME=\"AutomaticAllocation\" TYPE=\"boolean\"><VALUE>true</VALUE></PROPERTY>" +
+                       "<PROPERTY NAME=\"AutomaticDeallocation\" TYPE=\"boolean\"><VALUE>true</VALUE></PROPERTY>" +
+                       "<PROPERTY.ARRAY NAME=\"Connection\" TYPE=\"string\"></PROPERTY.ARRAY>" +
+                       "<PROPERTY NAME=\"ConsumerVisibility\" TYPE=\"uint16\"><VALUE>3</VALUE></PROPERTY>" +
+                       "<PROPERTY.ARRAY NAME=\"HostResource\" TYPE=\"string\"></PROPERTY.ARRAY>" +
+                       "<PROPERTY NAME=\"Limit\" TYPE=\"uint64\"><VALUE>1048576</VALUE></PROPERTY>" +
+                       "<PROPERTY NAME=\"MappingBehavior\" TYPE=\"uint16\"></PROPERTY>" +
+                       "<PROPERTY NAME=\"OtherResourceType\" TYPE=\"string\"></PROPERTY>" +
+                       "<PROPERTY NAME=\"Parent\" TYPE=\"string\"></PROPERTY>" +
+                       "<PROPERTY NAME=\"PoolID\" TYPE=\"string\"><VALUE></VALUE></PROPERTY>" +
+                       "<PROPERTY NAME=\"Reservation\" TYPE=\"uint64\"><VALUE>512</VALUE></PROPERTY>" +
+                       "<PROPERTY NAME=\"ResourceSubType\" TYPE=\"string\"><VALUE>Microsoft:Hyper-V:Memory</VALUE></PROPERTY>" +
+                       "<PROPERTY NAME=\"ResourceType\" TYPE=\"uint16\"><VALUE>4</VALUE></PROPERTY>" +
+                       $"<PROPERTY NAME=\"VirtualQuantity\" TYPE=\"uint64\" MODIFIED=\"TRUE\"><VALUE>{vm.PendingGBMemory * 1024}</VALUE></PROPERTY>" +
+                       "<PROPERTY NAME=\"VirtualQuantityUnits\" TYPE=\"string\"><VALUE>byte * 2^20</VALUE></PROPERTY>";
             }
             return "No implement setting type given";
         }

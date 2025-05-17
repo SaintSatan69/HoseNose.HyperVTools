@@ -40,7 +40,7 @@ namespace HyperVToolsPowershell
             {
                 throw new InvalidOperationException("Quantity Must be 1< x <1024");
             }
-            //the WSMAN URI so we can go talk to the remote server by spawning powershell
+            //the WSMAN URI so we can go talk to the remote server by spawning powershell (will not work against your local machine if not domain joined, it will error about implicit credentials)
             Uri remotewsman = new Uri($"http://{server}:5985/WSMAN");
             WSManConnectionInfo connectionInfo = new WSManConnectionInfo(remotewsman);
             connectionInfo.OperationTimeout = 10 * 60 * 1000;
@@ -54,7 +54,7 @@ namespace HyperVToolsPowershell
                 {
                     powershell.Runspace = remoterunspace;
                     powershell.AddCommand("Invoke-WebRequest")
-                    .AddParameter("-Uri", "http://localhost:6969/hypervschedular/")
+                    .AddParameter("-Uri", "http://localhost:6969/api/v1/changehardwarque")
                     .AddParameter("-Method", "POST")
                     .AddParameter("-Body", $"{System.Text.Json.JsonSerializer.Serialize(payload)}");
                     Collection<PSObject> results = powershell.Invoke();
@@ -96,6 +96,38 @@ namespace HyperVToolsPowershell
                 vms.Add(new VirtualMachine(Guid.Parse(vm.CimInstanceProperties["Name"].Value.ToString()), vm.CimInstanceProperties["ElementName"].Value.ToString(), cpu_count, mem_count));
             }
             WriteObject(vms);
+        }
+    }
+    [Cmdlet(VerbsCommon.Get,"HVPSGadgetInfo")]
+    public class GetHVPSGadgetInfo : Cmdlet
+    {
+        [Parameter(Mandatory = true, Position = 0)]
+        public string ComputerName
+        {
+            get { return TargetServer; }
+            set { TargetServer = value; }
+        }
+        private string TargetServer;
+        protected override void ProcessRecord() { 
+            //the WSMAN URI so we can go talk to the remote server by spawning powershell (will not work against your local machine if not domain joined, it will error about implicit credentials)
+            Uri remotewsman = new Uri($"http://{TargetServer}:5985/WSMAN");
+            WSManConnectionInfo connectionInfo = new WSManConnectionInfo(remotewsman);
+            connectionInfo.OperationTimeout = 10 * 60 * 1000;
+            connectionInfo.OpenTimeout = 1 * 60 * 1000;
+            using (Runspace remoterunspace = RunspaceFactory.CreateRunspace(connectionInfo))
+            {
+                remoterunspace.Open();
+                using (PowerShell powershell = PowerShell.Create())
+                {
+                    powershell.Runspace = remoterunspace;
+                    powershell.AddCommand("Invoke-WebRequest")
+                    .AddParameter("-Uri", "http://localhost:6969/api/v1/psgadgets")
+                    .AddParameter("-Method", "Get");
+                    Collection<PSObject> results = powershell.Invoke();
+                    WriteObject(results);
+                }
+                remoterunspace.Close();
+            }
         }
     }
 }

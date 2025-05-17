@@ -24,4 +24,28 @@ namespace HyperVTools
         public HardwareQueHTTP() { }
 #pragma warning enable
     }
+    public class PSGadgetsHttp
+    {
+        public string SchedularGuid { get; set; } = "";
+        public int QueCount { get; set; }
+
+        public int ServerCount { get; set; }
+        public int VmsProcessableCount { get; set; }
+        public bool IsProcessingVM { get; set; }
+        public int VmRetryQueCount { get; set; }
+        public TimeSpan RunTime { get; set; } = DateTime.Now - (HyperVTools.StartTime ?? DateTime.MinValue);
+        public PSGadgetsHttp(string ServerSchedularGUID, int queCount, int serverCount, int vmsProcessable, bool IsProcessing, int vmRetryCount)
+        {
+            SchedularGuid = ServerSchedularGUID;
+            QueCount = queCount;
+            ServerCount = serverCount;
+            VmsProcessableCount = vmsProcessable;
+            IsProcessingVM = IsProcessing;
+            VmRetryQueCount = vmRetryCount;
+        }
+
+#pragma warning disable
+        public PSGadgetsHttp (){ }
+#pragma warning enable
+    }
 }
